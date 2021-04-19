@@ -835,7 +835,7 @@ inline __host__ __device__ void static_m2l_acc(SCAL *__restrict__ Ltuple, SCAL *
 		case 5:
 			static_m2l_acc_<5, minm>(Ltuple, temp, Mtuple, d, r2);
 			break;
-		/*case 6:
+		case 6:
 			static_m2l_acc_<6, minm>(Ltuple, temp, Mtuple, d, r2);
 			break;
 		case 7:
