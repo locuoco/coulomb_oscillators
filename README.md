@@ -1,7 +1,7 @@
 # N-body Coulomb oscillators
 
 This repository contains two folders:
-- 'Simulation' contains a code that uses a Fast Multipole Method (FMM) in 2D cartesian coordinates and symplectic integrators for the simulation of a N-body system of charged particles with an external elastic potential (i.e. Coulomb oscillators). It is written in C++11 with multithreading and CUDA 8.0 GA2 (any later version can also be used). It also uses the CUDA UnBound (CUB) library 1.6.4 (again, a later version can be used as long as it is supported by the CUDA compiler). More info on usage by specifying '-h' argument.
+- 'Simulation' contains a code that uses a Fast Multipole Method (FMM) in 2D cartesian coordinates and symplectic integrators for the simulation of a N-body system of charged particles with an external elastic potential (i.e. Coulomb oscillators). It is written in C++11 with multithreading and CUDA 8.0 GA2 (any later version can also be used). It also uses the CUDA UnBound (CUB) library 1.6.4 (again, a later version can be used as long as it is supported by the CUDA compiler). More info on usage later.
 - 'Graphics' contains a code that graphically visualizes the evolution of the system. It takes the output of 'Simulation' as input. It is written in C++/OpenGL. It uses GL Mathematics, Freetype, FreeImage, GLEW and GLFW.
 
 The code is currently mainly developed by Alessandro Lo Cuoco. `parasort` is a parallel sorting algorithm by Amir Baserinia based on the C++ standard algorithm `std::sort` (modified by Alessandro Lo Cuoco and redistributed under the original GPL v3 license). This software contains source code provided by NVIDIA Corporation.+
@@ -30,7 +30,7 @@ available.
   initalised by sampling from a known distribution (KV or gaussian).
 
 Other options:
-- `-h` or `-help`       Display this documentation.
+- `-h` or `-help`       Display this information.
 - `-o <output>`       Specify the folder where the output will be written.
                     Default is `'./out'`. This folder must already exist. The
                     format of output files is the same as the input file format
@@ -40,7 +40,7 @@ Other options:
 - `-ds <v>`           Time step. Default is `5e-4`.
 - `-iters <n>`        Number of total simulation iterations. Default is `30000`.
 - `-steps <n>`        Number of steps to simulate before saving to file. Default
-                    is 200.
+                    is `200`.
 - `-integ <name>`     Set the symplectic integrator to be used instead of the
                     default one (2nd order). `<name>` must be chosen from the
                     list {`eu`, `fr`, `pefrl`}, respectively the semi-implicit Euler
@@ -56,9 +56,9 @@ Other options:
                     highly unreliable at certain conditions.
 - `-cpu`              Use CPU with multithreading (default is GPU).
 - `-cpu-threads <n>`  Number of CPU threads. Must be `1` or greater (default is `8`).
-                    Implies -cpu.
-- `-cacheline <n>`    CPU cache line size in bytes. Defaut is 64. Will be ignored
-                    if -cpu is NOT specified.
+                    Implies `-cpu`.
+- `-cacheline <n>`    CPU cache line size in bytes. Defaut is `64`. Will be ignored
+                    if `-cpu` is NOT specified.
 - `-gpu <blocksize>`  Specify the number of threads in a GPU block. It must be
                     chosen from the list {`1`, `32`, `64`, `128`, `256`, `512`, `1024`} (`1024`
                     threads is available for compute capability 2.0 and above).
