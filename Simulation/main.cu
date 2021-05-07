@@ -21,6 +21,7 @@ Compilation:
 <xy> is the compute capability of the GPU (usually given in the form x.y),
 for example sm_21 corresponds to a compute capability of 2.1.
 <includes> is the folder which contains the CUB library.
+Note: some CUDA versions may require the c++14 standard or later.
 	
 The resulting program will be called 'nbco'. A compatible C++ compilator must be
 available.

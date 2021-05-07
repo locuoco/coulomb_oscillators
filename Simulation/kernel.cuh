@@ -34,18 +34,18 @@
 #define STR_HELPER(x) #x
 #define STR(x) STR_HELPER(x)
 
-#ifndef __CUDACC_RTC__
-#define __CUDACC_RTC__
-#endif
+//#ifndef __CUDACC_RTC__
+//#define __CUDACC_RTC__
+//#endif
 
 #include "cuda_runtime.h"
-#include "device_launch_parameters.h"
+//#include "device_launch_parameters.h"
 #include "helper_math.h"
 
 // IMPORTANT: set WDDM TDR Delay to 60 sec (default is 2) from NVIDIA Nsight Monitor Options
 // otherwise, GPU functions (kernels) that take more than 2 seconds will fail
 
-#include <device_functions.h>
+//#include <device_functions.h>
 //#include <cuda_fp16.h> // half precision floating point
 
 #include <cmath>
@@ -54,8 +54,8 @@
 #include <thread>
 #include <vector>
 
-#define EXPAND(x) x
-#define VEC_T(U,n) EXPAND(U)##EXPAND(n) // vector type
+#define VEC_PASTE(U, n) U##n
+#define VEC_T(U, n) VEC_PASTE(U, n) /* vector type */
 #define VEC VEC_T(SCAL, DIM)
 #define IVEC VEC_T(int, DIM)
 

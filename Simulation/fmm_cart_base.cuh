@@ -734,7 +734,13 @@ inline __host__ __device__ void m2l_traceless_acc(SCAL *__restrict__ Ltuple, con
 }
 
 template<int n, int nmax, int m, bool traceless>
-inline __host__ __device__ std::enable_if<(n <= nmax), void>::type
+inline __host__ __device__ typename std::enable_if<(n > nmax), void>::type
+	static_m2l_inner2(SCAL *, const SCAL *, const SCAL *)
+{
+
+}
+template<int n, int nmax, int m, bool traceless>
+inline __host__ __device__ typename std::enable_if<(n <= nmax), void>::type
 	static_m2l_inner2(SCAL *__restrict__ Ltuple, const SCAL *__restrict__ grad, const SCAL *__restrict__ Mtuple)
 {
 	constexpr int mn = m-n; // 0 <= mn <= nM
@@ -747,15 +753,14 @@ inline __host__ __device__ std::enable_if<(n <= nmax), void>::type
 	static_m2l_inner2<n+1, nmax, m, traceless>(Ltuple, grad, Mtuple);
 }
 
-template<int n, int nmax, int m, bool traceless>
-inline __host__ __device__ std::enable_if<(n > nmax), void>::type
-	static_m2l_inner2(SCAL *, const SCAL *, const SCAL *)
-{
-
-}
-
 template<int m, int N, bool traceless>
-inline __host__ __device__ std::enable_if<(m <= 2*N), void>::type
+inline __host__ __device__ typename std::enable_if<(m > 2*N), void>::type
+	static_m2l_inner(SCAL *, SCAL *, const SCAL *, VEC, SCAL)
+{
+	
+}
+template<int m, int N, bool traceless>
+inline __host__ __device__ typename std::enable_if<(m <= 2*N), void>::type
 	static_m2l_inner(SCAL *__restrict__ Ltuple, SCAL *__restrict__ grad,
 					 const SCAL *__restrict__ Mtuple, VEC d, SCAL r)
 {
@@ -766,26 +771,20 @@ inline __host__ __device__ std::enable_if<(m <= 2*N), void>::type
 
 	static_m2l_inner<m+1, N, traceless>(Ltuple, grad, Mtuple, d, r);
 }
-template<int m, int N, bool traceless>
-inline __host__ __device__ std::enable_if<(m > 2*N), void>::type
-	static_m2l_inner(SCAL *, SCAL *, const SCAL *, VEC, SCAL)
+
+template<int n, int N>
+inline __host__ __device__ typename std::enable_if<(n > N), void>::type
+	static_m2l_refine(SCAL *)
 {
 	
 }
-
 template<int n, int N>
-inline __host__ __device__ std::enable_if<(n <= N), void>::type
+inline __host__ __device__ typename std::enable_if<(n <= N), void>::type
 	static_m2l_refine(SCAL *Ltuple)
 {
 	static_traceless_refine<n>(Ltuple + tensortupleoffset(n));
 
 	static_m2l_refine<n+1, N>(Ltuple);
-}
-template<int n, int N>
-inline __host__ __device__ std::enable_if<(n > N), void>::type
-	static_m2l_refine(SCAL *)
-{
-	
 }
 
 template<int N, int minm>
