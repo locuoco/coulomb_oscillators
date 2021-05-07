@@ -779,20 +779,22 @@ int main(const int argc, const char** argv)
 		else
 			initKV((VEC*)buf, 2 * nBodies, A, omega, gen);
 	}
-	
-	std::ofstream farg(strout + "/args.txt", std::ios::out);
-	if (farg)
-		for (int i = 0; i < argc; ++i)
-			farg << argv[i] << ' ';
-	else
-	{
-		std::cerr << "Error: cannot write on output location. "
-					 "Check that \"" << strout << "\" folder exists. Create it if not." << std::endl;
-		delete[] buf;
 
-		return -1;
+	if (!test)
+	{
+		std::ofstream farg(strout + "/args.txt", std::ios::out);
+		if (farg)
+			for (int i = 0; i < argc; ++i)
+				farg << argv[i] << ' ';
+		else
+		{
+			std::cerr << "Error: cannot write on output location. "
+						 "Check that \"" << strout << "\" folder exists. Create it if not." << std::endl;
+			delete[] buf;
+
+			return -1;
+		}
 	}
-	farg.close();
 	
 	SCAL par[]{
 		xi/(SCAL)nBodies, // xi/N
