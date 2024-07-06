@@ -1,5 +1,5 @@
 //  Appel's method
-//  Copyright (C) 2021 Alessandro Lo Cuoco (alessandro.locuoco@gmail.com)
+//  Copyright (C) 2021-24 Alessandro Lo Cuoco (alessandro.locuoco@gmail.com)
 
 //  This program is free software: you can redistribute it and/or modify
 //  it under the terms of the GNU General Public License as published by
@@ -27,7 +27,6 @@ struct Tree
 	SCAL *mpole;
 	int *__restrict__ mult, *__restrict__ index;
 };
-
 // "index" will be the index of the first element that belongs to the node
 // Sorting the particle array will be needed in order to avoid slow random access.
 
@@ -35,15 +34,15 @@ __global__ void printp(const VEC *p, int n)
 // print positions of all particles, for debug purposes
 {
 	for (int i = blockDim.x * blockIdx.x + threadIdx.x;
-		 i < n;
-		 i += gridDim.x * blockDim.x)
+	     i < n;
+	     i += gridDim.x * blockDim.x)
 	{
 		printf("p%d: (%e, %e)\n", i, p[i].x, p[i].y);
 	}
 }
 
 inline __host__ __device__ void evalKeys_krnl(int *keys, const VEC *p, const VEC *min, SCAL rdelta, int side,
-											  int begi, int endi, int stride)
+                                              int begi, int endi, int stride)
 // put particle i in box keys[i]
 {
 	for (int i = begi; i < endi; i += stride)
@@ -93,17 +92,18 @@ void evalIndices_cpu(int *ind, int n)
 		threads[i].join();
 }
 
-__global__ void check_krnl(const int *keys, int n)
+template <typename T>
+__global__ void check_krnl(const T *keys, int n)
 // check that particles are sorted correctly, for debug purposes
 {
     for (int i = blockDim.x * blockIdx.x + threadIdx.x;
-		 i < n-1;
-		 i += gridDim.x * blockDim.x)
+	     i < n-1;
+	     i += gridDim.x * blockDim.x)
 	{
         if (keys[i] > keys[i+1])
 			printf("!");
-		else
-			printf("_");
+		//else
+		//	printf("_");
 	}
 }
 
@@ -131,15 +131,15 @@ inline __device__ __host__ int tree_side(int l)
 __global__ void initLeaves(VEC *center, int m)
 {
 	for (int i = blockDim.x * blockIdx.x + threadIdx.x;
-		 i < m;
-		 i += gridDim.x * blockDim.x)
+	     i < m;
+	     i += gridDim.x * blockDim.x)
 	{
 		center[i] = VEC{};
 	}
 }
 
 inline __host__ __device__ void indexLeaves_krnl(int *__restrict__ index, const int *__restrict__ keys,
-												 int m, int n, int begi, int endi, int stride)
+                                                 int m, int n, int begi, int endi, int stride)
 // the index of first the particle contained in a non-empty cell will be associated to each cell
 // if the cell is empty, the index of first particle contained in a successive cell will be associated to it
 // if there are no non-empty successive cells, "n" will be associated to it
@@ -182,7 +182,7 @@ void indexLeaves_cpu(int *index, const int *keys, int m, int n)
 }
 
 inline __host__ __device__ void multLeaves_krnl(int *__restrict__ mult, const int *__restrict__ index, int m, int n,
-												int begi, int endi, int stride)
+                                                int begi, int endi, int stride)
 // calculate the number of particles (multiplicity) of each cell
 // it is trivial to calculate it after the index array is computed
 {
@@ -198,7 +198,7 @@ inline __host__ __device__ void multLeaves_krnl(int *__restrict__ mult, const in
 
 __global__ void multLeaves(int *mult, const int *index, int m, int n)
 {
-	multLeaves_krnl(mult, index, m, n, blockDim.x * blockIdx.x + threadIdx.x, n, gridDim.x * blockDim.x);
+	multLeaves_krnl(mult, index, m, n, blockDim.x * blockIdx.x + threadIdx.x, m, gridDim.x * blockDim.x);
 }
 
 void multLeaves_cpu(int *mult, const int *index, int m, int n)
@@ -216,15 +216,15 @@ __global__ void monopoleLeaves(SCAL *monopole, const int *mult, int m)
 // if all particles have the same charge/mass, then they are proportional to multiplicities
 {
 	for (int i = blockDim.x * blockIdx.x + threadIdx.x;
-		 i < m;
-		 i += gridDim.x * blockDim.x)
+	     i < m;
+	     i += gridDim.x * blockDim.x)
 	{
 		monopole[i] = (SCAL)mult[i];
 	}
 }
 
 inline __host__ __device__ void centerLeaves_krnl(VEC *__restrict__ center, const int *mult, const int *index,
-												  const VEC *__restrict__ p, int begi, int endi, int stride)
+                                                  const VEC *__restrict__ p, int begi, int endi, int stride)
 // calculate the center of charge/mass for each cell
 {
 	for (int i = begi; i < endi; i += stride)
@@ -258,21 +258,21 @@ void centerLeaves_cpu(VEC *center, const int *mult, const int *index, const VEC 
 }
 
 inline __host__ __device__ void p2p2_krnl(VEC *__restrict__ a, const int *mult, const int *index,
-										  const VEC *__restrict__ p, int side, int radius, SCAL d_EPS2,
-										  int begi, int endi, int stride)
+                                          const VEC *__restrict__ p, int side, int radius, SCAL d_EPS2,
+                                          int begi, int endi, int stride)
 // particle to particle interaction
 // radius: it is the infinity-norm radius (given as number of leaf cells) of the neighborhood area
-//		   centered on the leaf cell that contain the particle. Only interactions in this range
-//		   are considered here
+//         centered on the leaf cell that contain the particle. Only interactions in this range
+//         are considered here
 {
 	for (int ij = begi; ij < endi; ij += stride)
 	{
 		int ind1 = index[ij];
 		int i = ij / side, j = ij - i*side;
 		int kmin = ((i-radius > 0) ? (i-radius) : 0),
-			kmax = ((i+radius < side-1) ? (i+radius) : (side-1));
+		    kmax = ((i+radius < side-1) ? (i+radius) : (side-1));
 		int lmin = ((j-radius > 0) ? (j-radius) : 0),
-			lmax = ((j+radius < side-1) ? (j+radius) : (side-1));
+		    lmax = ((j+radius < side-1) ? (j+radius) : (side-1));
 		int mlt1 = mult[ij];
 		const VEC *p1 = p + ind1;
 		VEC *a1 = a + ind1;
@@ -313,6 +313,69 @@ void p2p2_cpu(VEC *a, const int *mult, const int *index, const VEC *p, int m, in
 	int niter = (m-1)/CPU_THREADS+1;
 	for (int i = 0; i < CPU_THREADS; ++i)
 		threads[i] = std::thread(p2p2_krnl, a, mult, index, p, side, radius, d_EPS2, niter*i, std::min(niter*(i+1), m), 1);
+	for (int i = 0; i < CPU_THREADS; ++i)
+		threads[i].join();
+}
+
+inline __host__ __device__ void p2p3_krnl(VEC *__restrict__ a, const int *mult, const int *index,
+                                          const VEC *__restrict__ p, int side, int radius, SCAL d_EPS2,
+                                          int begi, int endi, int stride)
+// particle to particle interaction
+// radius: it is the infinity-norm radius (given as number of leaf cells) of the neighborhood area
+//         centered on the leaf cell that contain the particle. Only interactions in this range
+//         are considered here
+{
+	for (int ijk = begi; ijk < endi; ijk += stride)
+	{
+		int ind1 = index[ijk];
+		int i = ijk / (side*side), jk = ijk - i*side*side, j = jk / side, k = jk - j*side;
+		int xmin = ((i-radius > 0) ? (i-radius) : 0),
+		    xmax = ((i+radius < side-1) ? (i+radius) : (side-1));
+		int ymin = ((j-radius > 0) ? (j-radius) : 0),
+		    ymax = ((j+radius < side-1) ? (j+radius) : (side-1));
+		int zmin = ((k-radius > 0) ? (k-radius) : 0),
+		    zmax = ((k+radius < side-1) ? (k+radius) : (side-1));
+		int mlt1 = mult[ijk];
+		const VEC *p1 = p + ind1;
+		VEC *a1 = a + ind1;
+		for (int h = 0; h < mlt1; ++h)
+		{
+			VEC atmp{};
+			for (int x = xmin; x <= xmax; ++x)
+				for (int y = ymin; y <= ymax; ++y)
+				{
+					int klT = x*side*side+y*side+zmin;
+					int indT = index[klT];
+					int mltT = mult[klT];
+					const int *multT = mult + klT;
+					const VEC *pT = p + indT;
+					for (int z = 1; z <= zmax - zmin; ++z)
+						mltT += multT[z];
+					for (int g = 0; g < mltT; ++g)
+					{
+						VEC d = p1[h] - pT[g];
+						SCAL dist2 = dot(d, d) + d_EPS2;
+						SCAL invDist2 = (SCAL)1 / dist2;
+
+						atmp = kernel(atmp, d, invDist2);
+					}
+				}
+			a1[h] = atmp;
+		}
+	}
+}
+
+__global__ void p2p3(VEC *a, const int *mult, const int *index, const VEC *p, int m, int side, int radius, SCAL d_EPS2)
+{
+	p2p3_krnl(a, mult, index, p, side, radius, d_EPS2, blockDim.x * blockIdx.x + threadIdx.x, m, gridDim.x * blockDim.x);
+}
+
+void p2p3_cpu(VEC *a, const int *mult, const int *index, const VEC *p, int m, int side, int radius, SCAL d_EPS2)
+{
+	std::vector<std::thread> threads(CPU_THREADS);
+	int niter = (m-1)/CPU_THREADS+1;
+	for (int i = 0; i < CPU_THREADS; ++i)
+		threads[i] = std::thread(p2p3_krnl, a, mult, index, p, side, radius, d_EPS2, niter*i, std::min(niter*(i+1), m), 1);
 	for (int i = 0; i < CPU_THREADS; ++i)
 		threads[i].join();
 }
@@ -365,7 +428,7 @@ __global__ void c2c2(Tree tree, int l, int radius, SCAL d_EPS2) // L -> 1
 		int i = ij / sidel, j = ij - i*sidel;
 		int im = (i/2)*2;
 		int kmin = ((im-2*radius > 0) ? (im-2*radius) : 0),
-			kmax = ((im+(2*radius+1) < sidel-1) ? (im+(2*radius+1)) : (sidel-1));
+		    kmax = ((im+(2*radius+1) < sidel-1) ? (im+(2*radius+1)) : (sidel-1));
 		int ij1 = beg + ij;
 			
 		VEC atmp{};
@@ -430,8 +493,8 @@ __global__ void pushLeaves(VEC *__restrict__ a, const VEC *__restrict__ field,
 // push informations about the field from leaves to individual particles
 {
 	for (int i = blockDim.x * blockIdx.x + threadIdx.x;
-		 i < m;
-		 i += gridDim.x * blockDim.x)
+	     i < m;
+	     i += gridDim.x * blockDim.x)
 	{
 		int mlt = mult[i];
 		VEC *ai = a + index[i];

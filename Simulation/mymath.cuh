@@ -260,6 +260,25 @@ inline __host__ __device__ int binomial(int n, int k)
 	return res;
 }
 
+inline __host__ __device__ int trinomial(int n, int j, int k)
+// trinomial coefficient
+// returns n! / (j! * k! * (n-j-k)!)
+// it assumes 0 <= j,k,j+k <= n
+{
+	if (j > n-j-k)
+		j = n-j-k;
+	if (k > n-j-k)
+		k = n-j-k;
+	int res = 1;
+	int num = n-j-k+1;
+	for (int den = 1; num <= n-k; ++num, ++den)
+		res = (res * num) / den;
+	for (int den = 1; num <= n; ++num, ++den)
+		res = (res * num) / den;
+	return res;
+}
+
+
 inline __host__ __device__ long long factorialfrac(int n, int k)
 // division between two factorials
 // returns n! / k!
@@ -365,28 +384,28 @@ inline __device__ __host__ int flatten(int4 v, int s)
 	return ((v.x * s + v.y) * s + v.z) * s + v.w;
 }
 
-inline __device__ __host__ SCAL fmax(VEC_T(SCAL, 2) a)
+inline SCAL fmax(VEC_T(SCAL, 2) a)
 {
 	return std::fmax(a.x, a.y);
 }
-inline __device__ __host__ SCAL fmax(VEC_T(SCAL, 3) a)
+inline SCAL fmax(VEC_T(SCAL, 3) a)
 {
 	return std::fmax(std::fmax(a.x, a.y), a.z);
 }
-inline __device__ __host__ SCAL fmax(VEC_T(SCAL, 4) a)
+inline SCAL fmax(VEC_T(SCAL, 4) a)
 {
 	return std::fmax(std::fmax(std::fmax(a.x, a.y), a.z), a.w);
 }
 
-inline __device__ __host__ SCAL fmin(VEC_T(SCAL, 2) a)
+inline SCAL fmin(VEC_T(SCAL, 2) a)
 {
 	return std::fmin(a.x, a.y);
 }
-inline __device__ __host__ SCAL fmin(VEC_T(SCAL, 3) a)
+inline SCAL fmin(VEC_T(SCAL, 3) a)
 {
 	return std::fmin(std::fmin(a.x, a.y), a.z);
 }
-inline __device__ __host__ SCAL fmin(VEC_T(SCAL, 4) a)
+inline SCAL fmin(VEC_T(SCAL, 4) a)
 {
 	return std::fmin(std::fmin(std::fmin(a.x, a.y), a.z), a.w);
 }

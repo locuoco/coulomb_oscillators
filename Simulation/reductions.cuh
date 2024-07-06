@@ -1,5 +1,5 @@
 //  CUDA reductions, based on code by NVIDIA Corporation
-//  Copyright (C) 2021 Alessandro Lo Cuoco (alessandro.locuoco@gmail.com)
+//  Copyright (C) 2021-24 Alessandro Lo Cuoco (alessandro.locuoco@gmail.com)
 
 //  This program is free software: you can redistribute it and/or modify
 //  it under the terms of the GNU General Public License as published by
@@ -19,7 +19,13 @@
 
 #include "kernel.cuh"
 
+#if DIM == 2
 #define ONES_VEC VEC{1,1}
+#elif DIM == 3
+#define ONES_VEC VEC{1,1,1}
+#elif DIM == 4
+#define ONES_VEC VEC{1,1,1,1}
+#endif
 
 bool isPow2(unsigned int x)
 {
@@ -101,7 +107,7 @@ __global__ void minmaxReduce_krnl(VEC *minmax_, const VEC *x, unsigned int n)
 		sminmax[sid] = fmin(sminmax[sid], sminmax[sid + 256]);
 		sminmax[sid+1] = fmax(sminmax[sid+1], sminmax[sid + 257]);
 	}
-     __syncthreads();
+    __syncthreads();
 
     if ((blockSize >= 128) && (tid <  64))
 	{

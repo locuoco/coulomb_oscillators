@@ -17,19 +17,7 @@
 #ifndef KERNEL_CUDA_H
 #define KERNEL_CUDA_H
 
-#ifndef SCAL
-#pragma message ("warning: scalar type SCAL macro not defined. Defaulting to float.")
-#define SCAL float
-#endif
-
-#ifndef DIM
-#pragma message ("warning: number of dimensions DIM macro not defined. Defaulting to 2.")
-#define DIM 2
-#endif
-
-#if (DIM < 2) || (DIM > 4)
-#error "DIM cannot be greater than 4 or smaller than 2"
-#endif
+#include "constants.cuh"
 
 #define STR_HELPER(x) #x
 #define STR(x) STR_HELPER(x)
@@ -129,7 +117,7 @@ void step_cpu(VEC *__restrict__ b, const VEC *__restrict__ a, SCAL ds, int n)
 }
 
 __global__ void add_elastic_krnl(const VEC *__restrict__ p, VEC *__restrict__ a, int n,
-								  const VEC *__restrict__ param)
+                                 const VEC *__restrict__ param)
 // elastic force computation kernel with elastic costants defined in "param" pointer
 {
 	for (int i = blockDim.x * blockIdx.x + threadIdx.x;
@@ -170,9 +158,9 @@ void add_elastic_cpu(VEC *__restrict__ p, VEC *__restrict__ a, int n, const SCAL
 	if (param != nullptr)
 		for (int i = 0; i < CPU_THREADS; ++i)
 			threads[i] = std::thread([=]{
-				VEC k{param[0], param[1]};
+				const VEC *k = (const VEC*)param;
 				for (int j = niter*i; j < std::min(niter*(i+1), n); ++j)
-					a[j] -= p[j] * k;
+					a[j] -= p[j] * k[0];
 			});
 	else
 		for (int i = 0; i < CPU_THREADS; ++i)
@@ -185,7 +173,7 @@ void add_elastic_cpu(VEC *__restrict__ p, VEC *__restrict__ a, int n, const SCAL
 }
 
 __global__ void elastic_krnl(const VEC *__restrict__ p, VEC *__restrict__ a, int n,
-								  const VEC *__restrict__ param)
+                             const VEC *__restrict__ param)
 // elastic force computation kernel with elastic costants defined in "param" pointer
 {
 	for (int i = blockDim.x * blockIdx.x + threadIdx.x;
@@ -223,9 +211,9 @@ void elastic_cpu(VEC *__restrict__ p, VEC *__restrict__ a, int n, const SCAL* pa
 	if (param != nullptr)
 		for (int i = 0; i < CPU_THREADS; ++i)
 			threads[i] = std::thread([=]{
-				VEC k{-param[0], -param[1]};
+				const VEC *k = (const VEC*)param;
 				for (int j = niter*i; j < std::min(niter*(i+1), n); ++j)
-					a[j] = p[j] * k;
+					a[j] = p[j] * -k[0];
 			});
 	else
 		for (int i = 0; i < CPU_THREADS; ++i)
@@ -237,8 +225,8 @@ void elastic_cpu(VEC *__restrict__ p, VEC *__restrict__ a, int n, const SCAL* pa
 		threads[i].join();
 }
 
-
-__global__ void gather_krnl(VEC *__restrict__ dst, const VEC *__restrict__ src, const int *map, int n)
+template<typename T>
+__global__ void gather_krnl(T *__restrict__ dst, const T *__restrict__ src, const int *map, int n)
 // dst array is built from src array through the map pointer
 {
     for (int i = blockDim.x * blockIdx.x + threadIdx.x;
@@ -263,7 +251,8 @@ void gather_cpu(T *__restrict__ dst, const T *__restrict__ src, const int *map, 
 		threads[i].join();
 }
 
-__global__ void copy_krnl(VEC *__restrict__ dst, const VEC *__restrict__ src, int n)
+template<typename T>
+__global__ void copy_krnl(T *__restrict__ dst, const T *__restrict__ src, int n)
 // copy content from src to dst
 {
     for (int i = blockDim.x * blockIdx.x + threadIdx.x;
@@ -274,7 +263,8 @@ __global__ void copy_krnl(VEC *__restrict__ dst, const VEC *__restrict__ src, in
 	}
 }
 
-void copy_gpu(VEC *dst, const VEC *src, int n)
+template<typename T>
+void copy_gpu(T *dst, const T *src, int n)
 {
 	int nBlocks = std::min(MAX_GRID_SIZE, (n + BLOCK_SIZE - 1) / BLOCK_SIZE);
 	copy_krnl <<< nBlocks, BLOCK_SIZE >>> (dst, src, n);

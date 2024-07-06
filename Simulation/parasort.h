@@ -24,6 +24,9 @@
 //      np: number of threads (default = 2)
 //      sf: sampling factor (default = 100)
 
+#ifndef PARASORT_H
+#define PARASORT_H
+
 #include <cstdlib>      // rand
 #include <cstring>      // memcpy
 #include <vector>       // std::vector
@@ -145,3 +148,4 @@ void parasort(size_t sz, T* list, Compare comp = Compare(), unsigned np = 2, uns
 	std::memcpy(list, &sorted[0], sz * sizeof(T) );
 }
 
+#endif // !PARASORT_H

@@ -108,7 +108,7 @@ In the following calculations we will use cartesian coordinates.
 
 */
 
-constexpr __host__ __device__ int tensortupleoffset(int p)
+constexpr __host__ __device__ int symmetricoffset(int p)
 {
 	return p * (p + 1) / 2;
 }
@@ -119,7 +119,7 @@ constexpr __host__ __device__ int tracelessoffset(int p)
 }
 
 inline __host__ __device__ void trace(SCAL *__restrict__ out, const SCAL *__restrict__ in, int n, int m)
-// contract 2m indices in n-order tensor "in" giving (n-2m)-order tensor "out"
+// contract 2m indices in n-order symmetric tensor "in" giving (n-2m)-order tensor "out"
 // assumes n >= 2m
 // if n = 2m the result is a scalar
 {
@@ -141,8 +141,8 @@ inline __host__ __device__ void swap(T &a, T &b)
 }
 
 inline __host__ __device__ void contract(SCAL *__restrict__ C, const SCAL *__restrict__ A,
-															   const SCAL *__restrict__ B,
-										 int nA, int nB)
+                                                               const SCAL *__restrict__ B,
+                                         int nA, int nB)
 // contract two symmetric tensors A, B into a symmetric tensor C of order |nA-nB|
 // if nA = nB the result is a scalar
 {
@@ -163,8 +163,8 @@ inline __host__ __device__ void contract(SCAL *__restrict__ C, const SCAL *__res
 }
 
 inline __host__ __device__ void contract_acc(SCAL *__restrict__ C, const SCAL *__restrict__ A,
-																   const SCAL *__restrict__ B,
-											 int nA, int nB)
+                                                                   const SCAL *__restrict__ B,
+                                             int nA, int nB)
 // contract two symmetric tensors A, B into a symmetric tensor of order |nA-nB|
 // and sum (accumulate) the result to C
 {
@@ -185,8 +185,8 @@ inline __host__ __device__ void contract_acc(SCAL *__restrict__ C, const SCAL *_
 }
 
 inline __host__ __device__ void contract_ma(SCAL *__restrict__ C, const SCAL *__restrict__ A,
-																  const SCAL *__restrict__ B,
-											SCAL c, int nA, int nB)
+                                                                  const SCAL *__restrict__ B,
+                                            SCAL c, int nA, int nB)
 // contract two symmetric tensors A, B into a symmetric tensor of order |nA-nB|
 // multiply it by a scalar c and sum (accumulate) the result to C
 {
@@ -207,8 +207,8 @@ inline __host__ __device__ void contract_ma(SCAL *__restrict__ C, const SCAL *__
 }
 
 inline __host__ __device__ void contract_traceless_ma(SCAL *__restrict__ C, const SCAL *__restrict__ A,
-																			const SCAL *__restrict__ B,
-													  SCAL c, int nA, int nB)
+                                                                            const SCAL *__restrict__ B,
+                                                      SCAL c, int nA, int nB)
 // contract two symmetric tensors A, B into a symmetric tensor of order |nA-nB|
 // multiply it by a scalar c and sum (accumulate) the result to C
 // we can reduce complexity by knowing that the result must be traceless
@@ -232,8 +232,8 @@ inline __host__ __device__ void contract_traceless_ma(SCAL *__restrict__ C, cons
 }
 
 inline __host__ __device__ void contract_traceless2_ma(SCAL *__restrict__ C, const SCAL *__restrict__ A,
-																			 const SCAL *__restrict__ B,
-													   SCAL c, int nA, int nB)
+                                                                             const SCAL *__restrict__ B,
+                                                       SCAL c, int nA, int nB)
 // contract two traceless symmetric tensors A, B into a traceless symmetric tensor of order |nA-nB|
 // multiply it by a scalar c and sum (accumulate) the result to C
 // we can reduce complexity by knowing that the result must be traceless
@@ -273,8 +273,8 @@ constexpr __host__ __device__ T static_max(T a, T b)
 
 template<int nA, int nB>
 inline __host__ __device__ void static_contract_traceless_ma(SCAL *__restrict__ C, const SCAL *__restrict__ A,
-																				   const SCAL *__restrict__ B,
-															 SCAL c)
+                                                                                   const SCAL *__restrict__ B,
+                                                             SCAL c)
 // contract two symmetric tensors A, B into a symmetric tensor of order |nA-nB|
 // multiply it by a scalar c and sum (accumulate) the result to C
 // we can reduce complexity by knowing that the result must be traceless
@@ -299,8 +299,8 @@ inline __host__ __device__ void static_contract_traceless_ma(SCAL *__restrict__ 
 
 template<int nA, int nB>
 inline __host__ __device__ void static_contract_traceless2_ma(SCAL *__restrict__ C, const SCAL *__restrict__ A,
-																					const SCAL *__restrict__ B,
-															  SCAL c)
+                                                                                    const SCAL *__restrict__ B,
+                                                              SCAL c)
 // contract two traceless symmetric tensors A, B into a traceless symmetric tensor of order |nA-nB|
 // multiply it by a scalar c and sum (accumulate) the result to C
 // we can reduce complexity by knowing that the result must be traceless
@@ -432,6 +432,7 @@ inline __host__ __device__ void tensorpow(SCAL *power, int n, VEC d)
 }
 
 inline __host__ __device__ void tracelesspow(SCAL *power, int n, VEC d, SCAL r)
+// r is the distance, d is the unit vector
 {
 	if (n == 0)
 		power[0] = (SCAL)1;
@@ -510,7 +511,7 @@ inline __host__ __device__ void m2m(SCAL *__restrict__ Mout, const SCAL *__restr
 		SCAL t{};
 		for (int m = 0; m <= n; ++m)
 		{
-			const SCAL *Mo = Mtuple + tensortupleoffset(n - m);
+			const SCAL *Mo = Mtuple + symmetricoffset(n - m);
 			SCAL c(0);
 			for (int k = max(0, m-j); k <= min(i, m); ++k)
 			{
@@ -535,7 +536,7 @@ inline __host__ __device__ void m2m_acc(SCAL *__restrict__ Mout, const SCAL *__r
 		SCAL t{};
 		for (int m = 0; m <= n; ++m)
 		{
-			const SCAL *Mo = Mtuple + tensortupleoffset(n - m);
+			const SCAL *Mo = Mtuple + symmetricoffset(n - m);
 			SCAL c(0);
 			for (int k = max(0, m-j); k <= min(i, m); ++k)
 			{
@@ -599,7 +600,7 @@ inline __host__ __device__ void m2m_traceless_acc(SCAL *__restrict__ Mout, SCAL 
 		for (int m = 0; m <= n; ++m)
 		{
 			SCAL C = static_factorial(n-m) * inv_factorial(n);
-			const SCAL *Mo = Mtuple + tensortupleoffset(n - m);
+			const SCAL *Mo = Mtuple + symmetricoffset(n - m);
 			tracelesspow(power, m, d, r);
 			for (int i = 0; i <= n; i += 2)
 			{
@@ -682,7 +683,7 @@ inline __host__ __device__ void m2l(SCAL *__restrict__ Ltuple, SCAL *__restrict_
 		{
 			int mn = m-n; // 0 <= mn <= nM
 			SCAL C = inv_factorial(n);
-			contract_traceless_ma(Ltuple + tracelessoffset(n), Mtuple + tensortupleoffset(mn), temp, C, mn, m);
+			contract_traceless_ma(Ltuple + tracelessoffset(n), Mtuple + symmetricoffset(mn), temp, C, mn, m);
 		}
 	}
 }
@@ -706,7 +707,7 @@ inline __host__ __device__ void m2l_acc(SCAL *__restrict__ Ltuple, SCAL *__restr
 		{
 			int mn = m-n; // 0 <= mn <= nM
 			SCAL C = inv_factorial(n);
-			contract_traceless_ma(Ltuple + tracelessoffset(n), Mtuple + tensortupleoffset(mn), temp, C, mn, m);
+			contract_traceless_ma(Ltuple + tracelessoffset(n), Mtuple + symmetricoffset(mn), temp, C, mn, m);
 		}
 	}
 }
@@ -748,7 +749,7 @@ inline __host__ __device__ typename std::enable_if<(n <= nmax), void>::type
 	if (traceless)
 		static_contract_traceless2_ma<mn, m>(Ltuple + tracelessoffset(n), Mtuple + tracelessoffset(mn), grad, C);
 	else
-		static_contract_traceless_ma<mn, m>(Ltuple + tracelessoffset(n), Mtuple + tensortupleoffset(mn), grad, C);
+		static_contract_traceless_ma<mn, m>(Ltuple + tracelessoffset(n), Mtuple + symmetricoffset(mn), grad, C);
 
 	static_m2l_inner2<n+1, nmax, m, traceless>(Ltuple, grad, Mtuple);
 }
@@ -782,7 +783,7 @@ template<int n, int N>
 inline __host__ __device__ typename std::enable_if<(n <= N), void>::type
 	static_m2l_refine(SCAL *Ltuple)
 {
-	static_traceless_refine<n>(Ltuple + tensortupleoffset(n));
+	static_traceless_refine<n>(Ltuple + symmetricoffset(n));
 
 	static_m2l_refine<n+1, N>(Ltuple);
 }
@@ -862,7 +863,7 @@ inline __host__ __device__ void static_m2l_acc(SCAL *__restrict__ Ltuple, SCAL *
 			static_m2l_acc_<14, minm>(Ltuple, temp, Mtuple, d, r2);
 			break;
 		case 15:
-			static_m2l_acc_<15, minm>(Ltuple, Mtuple, d, r2);
+			static_m2l_acc_<15, minm>(Ltuple, temp, Mtuple, d, r2);
 			break;*/ // uncomment only when needed, because this will rise compilation times significantly
 		default:
 			m2l_acc(Ltuple, temp, Mtuple, N, N, d, r2, minm);
@@ -885,7 +886,7 @@ inline __host__ __device__ void l2l(SCAL *__restrict__ Lout, SCAL *__restrict__ 
 		int mn = m-n;
 		tensorpow(temp, mn, d);
 		SCAL C = binomial(m, mn);
-		contract_traceless_ma(Lout, Ltuple + tensortupleoffset(m), temp, C, m, mn);
+		contract_traceless_ma(Lout, Ltuple + symmetricoffset(m), temp, C, m, mn);
 		traceless_refine(Lout, n);
 	}
 }
@@ -903,7 +904,7 @@ inline __host__ __device__ void l2l_acc(SCAL *__restrict__ Lout, SCAL *__restric
 		int mn = m-n;
 		tensorpow(temp, mn, d);
 		SCAL C = binomial(m, mn);
-		contract_traceless_ma(Lout, Ltuple + tensortupleoffset(m), temp, C, m, mn);
+		contract_traceless_ma(Lout, Ltuple + symmetricoffset(m), temp, C, m, mn);
 		traceless_refine(Lout, n);
 	}
 }
@@ -933,10 +934,11 @@ inline __host__ __device__ SCAL m2p_pot(SCAL *__restrict__ temp, const SCAL *__r
 // temp is a temporary memory that needs at least nM+2 elements (independent for each thread)
 {
 	SCAL pot(0);
+	r2 = sqrt(r2);
 	for (int n = 0; n <= nM; ++n)
 	{
 		gradient(temp+1, n, d, r2);
-		contract(temp, Mtuple + tensortupleoffset(n), temp+1, n, n);
+		contract(temp, Mtuple + symmetricoffset(n), temp+1, n, n);
 		pot += temp[0];
 	}
 	return pot;
@@ -953,7 +955,7 @@ inline __host__ __device__ SCAL l2p_pot(SCAL *__restrict__ temp, const SCAL *__r
 	for (int n = 0; n <= nL; ++n)
 	{
 		tensorpow(temp+1, n, d);
-		contract(temp, Ltuple + tensortupleoffset(n), temp+1, n, n);
+		contract(temp, Ltuple + symmetricoffset(n), temp+1, n, n);
 		pot += temp[0];
 	}
 	return pot;
@@ -967,10 +969,11 @@ inline __host__ __device__ VEC m2p_field(SCAL *__restrict__ temp, const SCAL *__
 // temp is a temporary memory that needs at least nM+4 elements (independent for each thread)
 {
 	VEC field{};
+	r2 = sqrt(r2);
 	for (int n = 0; n <= nM; ++n)
 	{
 		gradient(temp+2, n+1, d, r2);
-		contract(temp, Mtuple + tensortupleoffset(n), temp+2, n, n+1);
+		contract(temp, Mtuple + symmetricoffset(n), temp+2, n, n+1);
 		field.x -= temp[0];
 		field.y -= temp[1];
 	}
@@ -988,7 +991,7 @@ inline __host__ __device__ VEC l2p_field(SCAL *__restrict__ temp, const SCAL *__
 	for (int n = 1; n <= nL; ++n)
 	{
 		tensorpow(temp+2, n-1, d);
-		contract(temp, Ltuple + tensortupleoffset(n), temp+2, n, n-1);
+		contract(temp, Ltuple + symmetricoffset(n), temp+2, n, n-1);
 		SCAL C = (SCAL)n;
 		field.x -= C*temp[0];
 		field.y -= C*temp[1];

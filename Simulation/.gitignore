@@ -1,0 +1,33 @@
+# Ignore all files without extension, except LICENSE and Makefile
+*
+!*.*
+!*/
+!LICENSE
+!Makefile
+
+# Temporary/backup files
+__pycache__/
+tests/
+out/
+old/
+*.bak
+
+# Windows dynamic-link libraries
+*.dll
+
+# Windows static libraries
+*.lib
+
+# Visual Studio files
+*.exp
+*.pdb
+
+# Windows executables
+*.exe
+
+# References
+ref/
+tex/
+
+# Resources
+resources/

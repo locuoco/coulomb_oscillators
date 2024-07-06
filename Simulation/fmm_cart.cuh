@@ -31,7 +31,7 @@ struct fmmTree
 
 inline __host__ __device__ void fmm_init_krnl(fmmTree tree, int l, int begi, int endi, int stride)
 {
-	int offL = tracelessoffset(tree.p+1), offM = tensortupleoffset(tree.p+1);
+	int offL = tracelessoffset(tree.p+1), offM = symmetricoffset(tree.p+1);
 	int beg = tree_beg(l);
 	VEC *center = tree.center + beg;
 	SCAL *mpole = tree.mpole + beg*offM,
@@ -70,7 +70,7 @@ inline __host__ __device__ void fmm_multipoleLeaves_krnl(fmmTree tree, const VEC
 // calculate multipoles for each cell
 // assumes all particles have the same charge/mass
 {
-	int off = tensortupleoffset(tree.p+1);
+	int off = symmetricoffset(tree.p+1);
 	int beg = tree_beg(L);
 	const VEC *center = tree.center + beg;
 	const int *index = tree.index + beg, *mult = tree.mult + beg;
@@ -89,7 +89,7 @@ inline __host__ __device__ void fmm_multipoleLeaves_krnl(fmmTree tree, const VEC
 				if (r != 0)
 					d /= r;*/
 				for (int q = 2; q <= tree.p; ++q)
-					p2m_acc(multipole + tensortupleoffset(q), q, d);
+					p2m_acc(multipole + symmetricoffset(q), q, d);
 			}
 		}
 	}
@@ -117,7 +117,7 @@ inline __host__ __device__ void fmm_buildTree2_krnl(fmmTree tree, int l, int beg
 // build the l-th of cells after the deeper one (l+1)-th
 // "tree" contains only pointers to the actual tree in memory
 {
-	int off = tensortupleoffset(tree.p+1);
+	int off = symmetricoffset(tree.p+1);
 	int sidel = tree_side(l);
 	int sidelp = tree_side(l+1);
 	int beg = tree_beg(l), begp = tree_beg(l+1);
@@ -153,7 +153,7 @@ inline __host__ __device__ void fmm_buildTree2_krnl(fmmTree tree, int l, int beg
 				if (r != 0)
 					d /= r;*/
 				for (int q = 2; q <= tree.p; ++q)
-					m2m_acc(multipole + tensortupleoffset(q), multipole2, q, d);
+					m2m_acc(multipole + symmetricoffset(q), multipole2, q, d);
 
 				d = coord - tree.center[ijp + 1];
 				/*r = sqrt(dot(d,d));
@@ -161,7 +161,7 @@ inline __host__ __device__ void fmm_buildTree2_krnl(fmmTree tree, int l, int beg
 					d /= r;*/
 				multipole2 = tree.mpole + (ijp + 1)*off;
 				for (int q = 2; q <= tree.p; ++q)
-					m2m_acc(multipole + tensortupleoffset(q), multipole2, q, d);
+					m2m_acc(multipole + symmetricoffset(q), multipole2, q, d);
 
 				d = coord - tree.center[ijp + sidelp];
 				/*r = sqrt(dot(d,d));
@@ -169,7 +169,7 @@ inline __host__ __device__ void fmm_buildTree2_krnl(fmmTree tree, int l, int beg
 					d /= r;*/
 				multipole2 = tree.mpole + (ijp + sidelp)*off;
 				for (int q = 2; q <= tree.p; ++q)
-					m2m_acc(multipole + tensortupleoffset(q), multipole2, q, d);
+					m2m_acc(multipole + symmetricoffset(q), multipole2, q, d);
 
 				d = coord - tree.center[ijp + sidelp + 1];
 				/*r = sqrt(dot(d,d));
@@ -177,7 +177,7 @@ inline __host__ __device__ void fmm_buildTree2_krnl(fmmTree tree, int l, int beg
 					d /= r;*/
 				multipole2 = tree.mpole + (ijp + sidelp + 1)*off;
 				for (int q = 2; q <= tree.p; ++q)
-					m2m_acc(multipole + tensortupleoffset(q), multipole2, q, d);
+					m2m_acc(multipole + symmetricoffset(q), multipole2, q, d);
 			}
 			multipole[0] = mpole0;
 		}
@@ -216,7 +216,7 @@ inline __host__ __device__ void fmm_c2c2_krnl(fmmTree tree, int l, int radius, S
 // L -> 1
 // cell to cell interaction
 {
-	int offM = tensortupleoffset(tree.p+1), offL = tracelessoffset(tree.p+1);
+	int offM = symmetricoffset(tree.p+1), offL = tracelessoffset(tree.p+1);
 	int sidel = tree_side(l);
 	int beg = tree_beg(l);
 	for (int ij = begi; ij < endi; ij += stride)
@@ -420,7 +420,7 @@ void fmm_cart(VEC *p, VEC *a, int n, const SCAL* param)
 		nL1 = 1 << ((L+1)*DIM);
 		sideL = 1 << L;
 		int ntot = (nL1 - 1) / (nZ - 1);
-		int new_size = (sizeof(VEC) + sizeof(SCAL)*(tensortupleoffset(order+1) + tracelessoffset(order+1))
+		int new_size = (sizeof(VEC) + sizeof(SCAL)*(symmetricoffset(order+1) + tracelessoffset(order+1))
 					  + sizeof(int)*2)*ntot;
 
 		if (new_size > old_size)
@@ -436,7 +436,7 @@ void fmm_cart(VEC *p, VEC *a, int n, const SCAL* param)
 		}
 		tree.center = (VEC*)d_tbuf;
 		tree.mpole = (SCAL*)(tree.center + ntot);
-		tree.local = tree.mpole + ntot*tensortupleoffset(order+1);
+		tree.local = tree.mpole + ntot*symmetricoffset(order+1);
 		tree.mult = (int*)(tree.local + ntot*tracelessoffset(order+1));
 		tree.index = tree.mult + ntot;
 		tree.p = order;
@@ -568,7 +568,7 @@ void fmm_cart_cpu(VEC *p, VEC *a, int n, const SCAL* param)
 		nL1 = 1 << ((L+1)*DIM);
 		sideL = 1 << L;
 		int ntot = (nL1 - 1) / (nZ - 1);
-		int new_size = (sizeof(VEC) + sizeof(SCAL)*(tensortupleoffset(order+1) + tracelessoffset(order+1))
+		int new_size = (sizeof(VEC) + sizeof(SCAL)*(symmetricoffset(order+1) + tracelessoffset(order+1))
 					  + sizeof(int)*2)*ntot;
 
 		if (new_size > old_size)
@@ -580,7 +580,7 @@ void fmm_cart_cpu(VEC *p, VEC *a, int n, const SCAL* param)
 		}
 		tree.center = (VEC*)tbuf;
 		tree.mpole = (SCAL*)(tree.center + ntot);
-		tree.local = tree.mpole + ntot*tensortupleoffset(order+1);
+		tree.local = tree.mpole + ntot*symmetricoffset(order+1);
 		tree.mult = (int*)(tree.local + ntot*tracelessoffset(order+1));
 		tree.index = tree.mult + ntot;
 		tree.p = order;

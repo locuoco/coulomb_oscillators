@@ -87,7 +87,7 @@ __global__ void direct_krnl(const VEC *__restrict__ p, VEC *__restrict__ a, int 
 				atmp = kernel(atmp, d, invDist2);
 			}
 			__syncthreads(); // wait that all threads in the current block have finished before writing
-							 // in shared memory again
+			                 // in shared memory again
 		}
 		if (tid < n - Tiles * blockDim.x)
 			spos[tid] = p[Tiles * blockDim.x + tid];
@@ -216,8 +216,13 @@ inline __host__ __device__ void direct3_core(const VEC *__restrict__ p, VEC *__r
 			VEC d = p[i] - p[j];
 			SCAL dist2 = dot(d, d) + d_EPS2;
 			SCAL invDist2 = (SCAL)1 / dist2; // __drcp_rn = (double) reciprocal + round to nearest
-
+#if DIM == 2
 			VEC y = d * invDist2 - c;
+#elif DIM == 3
+			VEC y = d * invDist2 * sqrt(invDist2) - c;
+#else // DIM == 4
+			VEC y = d * invDist2 * invDist2 - c;
+#endif
 			VEC t = atmp + y;
 			c = (t - atmp) - y;
 			atmp = t;

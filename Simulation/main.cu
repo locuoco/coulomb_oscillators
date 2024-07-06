@@ -26,6 +26,8 @@ Note: some CUDA versions may require the c++14 standard or later.
 The resulting program will be called 'nbco'. A compatible C++ compilator must be
 available.
 
+nvcc main.cu -o nbco -O3 -std=c++11 -arch=sm_75
+
 */
 
 // Important defines
@@ -93,6 +95,7 @@ void coulombOscillatorFMM_cpu(VEC *p, VEC *a, int n, const SCAL* param)
 }
 
 void centerDist(VEC *data, int n)
+// center the sampled distribution
 {
 	VEC d{};
 	for (int i = 0; i < n; ++i)
@@ -103,6 +106,7 @@ void centerDist(VEC *data, int n)
 }
 
 void adjustRMS(VEC *data, int n, VEC adj)
+// adjust the RMS of the sampled distribution such that it's equal to adj
 {
 	VEC d{};
 	for (int i = 0; i < n; ++i)
@@ -344,7 +348,7 @@ int main(const int argc, const char** argv)
 							 "  -r <radius>       Interaction radius. Must be 1 or greater. Default is 1.\n"
 							 "  -eps <v>          Smoothing factor. Must be greater than 0. Default is 1e-9.\n"
 							 "  -i <v>            A factor so that max FMM level is round(log(n*i/p^(3/2))).\n"
-							 "                    Default is 1.\n"
+							 "                    Default is 1.\n" // !
 							 "  -ncoll            P2P pass will not be calculated, effectively ignoring\n"
 							 "                    collisional effects. Note however that the result will\n"
 							 "                    depend on the max FMM level, and the simulation may be\n"
@@ -532,9 +536,9 @@ int main(const int argc, const char** argv)
 					return -1;
 				}
 				dens_inhom = atof(argv[i+1]);
-				if (dens_inhom < 1)
+				if (dens_inhom <= 0)
 				{
-					std::cerr << "Error: invalid argument to '-i': " << argv[i+1] << " (should be 1 or greater)\n";
+					std::cerr << "Error: invalid argument to '-i': " << argv[i+1] << " (should be greater than 0)\n";
 					return -1;
 				}
 				++i;
