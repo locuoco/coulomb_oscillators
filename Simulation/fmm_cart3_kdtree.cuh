@@ -188,7 +188,7 @@ void evalKeys_kdtree_cpu(unsigned long long *keys, const int *splitdim, const VE
 inline __host__ __device__ void evalKeysLeaves_kdtree_krnl(int *keys, int n, int L,
                                                            int begi, int endi, int stride)
 {
-	int m = kd_n(L);
+	long long m = kd_n(L);
 	for (int i = begi; i < endi; i += stride)
 		keys[i] = m * i / n;
 }
@@ -385,8 +385,8 @@ __global__ void fmm_dualTraversal(fmmTree_kd tree, int2 *p2p_list, int2 *m2l_lis
 
 	if (threadIdx.x == 0 && blockIdx.x == 0)
 	{
-		top = 0;
-		stack[top++] = np;
+		stack[0] = np;
+		top = 1;
 		*p2p_n = 0;
 		*m2l_n = 0;
 	}
@@ -402,19 +402,26 @@ __global__ void fmm_dualTraversal(fmmTree_kd tree, int2 *p2p_list, int2 *m2l_lis
 
 		__syncthreads();
 		if (threadIdx.x == 0)
-		{
-			top -= blockDim.x;
-			top = (top < 0) ? 0 : top;
-		}
+			top = max(top - (int)blockDim.x, 0);
 		__syncthreads();
 
-		if (stack_pos >= 0 && tree.mult[np.x] > 0 && tree.mult[np.y] > 0)
+		if (stack_pos >= 0)
 		{
-			if (kd_lchild(np.x) >= ntot && kd_lchild(np.y) >= ntot)
+			if (kd_lchild(np.x) >= ntot & kd_lchild(np.y) >= ntot)
 			{
-				int pos = atomicAdd(p2p_n, 1);
-				if (pos < p2p_max)
-					p2p_list[pos] = np;
+				if (np.x != np.y)
+				{
+					int pos = atomicAdd(p2p_n, 1);
+					if (pos < p2p_max)
+						p2p_list[pos] = np;
+				}
+			}
+			else if (np.x == np.y)
+			{
+				int pos = atomicAdd(&top, 3);
+				stack[pos] = {kd_lchild(np.x), kd_lchild(np.x)};
+				stack[pos+1] = {kd_lchild(np.x), kd_rchild(np.x)};
+				stack[pos+2] = {kd_rchild(np.x), kd_rchild(np.x)};
 			}
 			else if (kd_admissible(tree, np.x, np.y, r))
 			{
@@ -422,24 +429,13 @@ __global__ void fmm_dualTraversal(fmmTree_kd tree, int2 *p2p_list, int2 *m2l_lis
 				if (pos < m2l_max)
 					m2l_list[pos] = np;
 			}
-			else if (kd_lchild(np.x) >= ntot || (kd_lchild(np.y) < ntot
-				&& kd_size(tree.lbound[np.x], tree.rbound[np.x]) <= kd_size(tree.lbound[np.y], tree.rbound[np.y])))
-			{
-				int pos = atomicAdd(&top, 1);
-				stack[pos].x = np.x;
-				stack[pos].y = kd_lchild(np.y);
-				pos = atomicAdd(&top, 1);
-				stack[pos].x = np.x;
-				stack[pos].y = kd_rchild(np.y);
-			}
 			else
 			{
-				int pos = atomicAdd(&top, 1);
-				stack[pos].x = kd_lchild(np.x);
-				stack[pos].y = np.y;
-				pos = atomicAdd(&top, 1);
-				stack[pos].x = kd_rchild(np.x);
-				stack[pos].y = np.y;
+				bool cond = kd_lchild(np.x) >= ntot | (kd_lchild(np.y) < ntot
+					& kd_size(tree.lbound[np.x], tree.rbound[np.x]) <= kd_size(tree.lbound[np.y], tree.rbound[np.y]));
+				int pos = atomicAdd(&top, 2);
+				stack[pos] = cond ? int2{np.x, kd_lchild(np.y)} : int2{kd_lchild(np.x), np.y};
+				stack[pos+1] = cond ? int2{np.x, kd_rchild(np.y)} : int2{kd_rchild(np.x), np.y};
 			}
 		}
 		__syncthreads();
@@ -457,6 +453,7 @@ __global__ void fmm_dualTraversal(fmmTree_kd tree, int2 *p2p_list, int2 *m2l_lis
 			*m2l_n = m2l_max;
 			printf("\nexceeded m2l allocated memory\n");
 		}
+		//printf("i: %d\n", i);
 		//printf("p2p_n: %d\n", *p2p_n);
 		//printf("m2l_n: %d\n", *m2l_n);
 	}
@@ -479,23 +476,29 @@ void fmm_dualTraversal_cpu(const fmmTree_kd& tree, std::vector<int2>& p2p_list, 
 		np = stack.back();
 		stack.pop_back();
 
-		if (tree.mult[np.x] > 0 && tree.mult[np.y] > 0)
+		if (kd_lchild(np.x) >= ntot && kd_lchild(np.y) >= ntot)
 		{
-			if (kd_lchild(np.x) >= ntot && kd_lchild(np.y) >= ntot)
+			if (np.x != np.y)
 				p2p_list.push_back(np);
-			else if (kd_admissible(tree, np.x, np.y, r))
-				m2l_list.push_back(np);
-			else if (kd_lchild(np.x) >= ntot || (kd_lchild(np.y) < ntot
-				&& kd_size(tree.lbound[np.x], tree.rbound[np.x]) <= kd_size(tree.lbound[np.y], tree.rbound[np.y])))
-			{
-				stack.push_back({np.x, kd_lchild(np.y)});
-				stack.push_back({np.x, kd_rchild(np.y)});
-			}
-			else
-			{
-				stack.push_back({kd_lchild(np.x), np.y});
-				stack.push_back({kd_rchild(np.x), np.y});
-			}
+		}
+		else if (np.x == np.y)
+		{
+			stack.push_back({kd_lchild(np.x), kd_lchild(np.x)});
+			stack.push_back({kd_lchild(np.x), kd_rchild(np.x)});
+			stack.push_back({kd_rchild(np.x), kd_rchild(np.x)});
+		}
+		else if (kd_admissible(tree, np.x, np.y, r))
+			m2l_list.push_back(np);
+		else if (kd_lchild(np.x) >= ntot || (kd_lchild(np.y) < ntot
+			&& kd_size(tree.lbound[np.x], tree.rbound[np.x]) <= kd_size(tree.lbound[np.y], tree.rbound[np.y])))
+		{
+			stack.push_back({np.x, kd_lchild(np.y)});
+			stack.push_back({np.x, kd_rchild(np.y)});
+		}
+		else
+		{
+			stack.push_back({kd_lchild(np.x), np.y});
+			stack.push_back({kd_rchild(np.x), np.y});
 		}
 	}
 }
@@ -514,6 +517,7 @@ inline __host__ __device__ void fmm_c2c3_kdtree_krnl(fmmTree_kd tree, const int2
 		SCAL r2 = dot(d, d) + d_EPS2;
 
 		static_m2l_acc3<1, true>(tree.local + n1*off, tempi, tree.mpole + n2*off, tree.p, d, r2);
+		static_m2l_acc3<1, true>(tree.local + n2*off, tempi, tree.mpole + n1*off, tree.p, -d, r2);
 	}
 }
 
@@ -539,12 +543,45 @@ void fmm_c2c3_kdtree_cpu(fmmTree_kd tree, const int2 *m2l_list, const int *m2l_n
 		delete[] temp[i];
 }
 
+inline __host__ __device__ void fmm_p2p_interaction(VEC *__restrict__ a1, const VEC *__restrict__ p1, const VEC *__restrict__ p2,
+                                                    int mlt1, int mlt2, SCAL d_EPS2)
+{
+	SCAL *a1h;
+
+	for (int h = 0; h < mlt1; ++h)
+	{
+		VEC atmp{};
+		for (int g = 0; g < mlt2; ++g)
+		{
+			VEC d = p1[h] - p2[g];
+			SCAL dist2 = dot(d, d) + d_EPS2;
+			SCAL invDist2 = (SCAL)1 / dist2;
+
+			atmp = kernel(atmp, d, invDist2);
+		}
+		a1h = (SCAL*)(a1 + h);
+#ifdef __CUDA_ARCH__
+		myAtomicAdd(a1h + 0, atmp.x);
+		myAtomicAdd(a1h + 1, atmp.y);
+		myAtomicAdd(a1h + 2, atmp.z);
+#else
+		std::atomic_ref<SCAL> atomic0(a1h[0]);
+		std::atomic_ref<SCAL> atomic1(a1h[1]);
+		std::atomic_ref<SCAL> atomic2(a1h[2]);
+		atomic0 += atmp.x;
+		atomic1 += atmp.y;
+		atomic2 += atmp.z;
+#endif
+	}
+}
+
 inline __host__ __device__ void fmm_p2p3_kdtree_krnl(VEC *__restrict__ a, const fmmTree_kd tree, const VEC *__restrict__ p,
-                                                     const int2 *p2p_list, SCAL d_EPS2,
+                                                     const int2 *p2p_list, int mlt_max, SCAL d_EPS2,
                                                      int begi, int endi, int stride)
 // particle to particle interaction
 {
-	int off = tracelessoffset3(tree.p+1);
+#ifdef __CUDA_ARCH__
+	VEC *s_at = (VEC*)alloca(mlt_max*sizeof(VEC));
 	for (int i = begi; i < endi; i += stride)
 	{
 		int n1 = p2p_list[i].x;
@@ -557,7 +594,12 @@ inline __host__ __device__ void fmm_p2p3_kdtree_krnl(VEC *__restrict__ a, const 
 		const VEC *p1 = p + ind1;
 		const VEC *p2 = p + ind2;
 		VEC *a1 = a + ind1;
+		VEC *a2 = a + ind2;
 		SCAL *a1h;
+		SCAL *a2g;
+
+		for (int g = 0; g < mlt2; ++g)
+			s_at[g] = VEC{};
 
 		for (int h = 0; h < mlt1; ++h)
 		{
@@ -565,41 +607,160 @@ inline __host__ __device__ void fmm_p2p3_kdtree_krnl(VEC *__restrict__ a, const 
 			for (int g = 0; g < mlt2; ++g)
 			{
 				VEC d = p1[h] - p2[g];
-				SCAL dist2 = dot(d, d) + d_EPS2;
-				SCAL invDist2 = (SCAL)1 / dist2;
+				SCAL k = dot(d, d) + d_EPS2;
+				k = (SCAL)1 / k;
+				k *= sqrt(k);
+				d *= k;
 
-				atmp = kernel(atmp, d, invDist2);
+				atmp += d;
+				s_at[g] -= d;
 			}
 			a1h = (SCAL*)(a1 + h);
-#ifdef __CUDA_ARCH__
+
 			myAtomicAdd(a1h + 0, atmp.x);
 			myAtomicAdd(a1h + 1, atmp.y);
 			myAtomicAdd(a1h + 2, atmp.z);
-#else
-			std::atomic_ref<SCAL> atomic0(a1h[0]);
-			std::atomic_ref<SCAL> atomic1(a1h[1]);
-			std::atomic_ref<SCAL> atomic2(a1h[2]);
-			atomic0 += atmp.x;
-			atomic1 += atmp.y;
-			atomic2 += atmp.z;
-#endif
 		}
+		for (int g = 0; g < mlt2; ++g)
+		{
+			a2g = (SCAL*)(a2 + g);
+
+			myAtomicAdd(a2g + 0, s_at[g].x);
+			myAtomicAdd(a2g + 1, s_at[g].y);
+			myAtomicAdd(a2g + 2, s_at[g].z);
+		}
+	}
+#else
+	for (int i = begi; i < endi; i += stride)
+	{
+		int n1 = p2p_list[i].x;
+		int n2 = p2p_list[i].y;
+
+		int ind1 = tree.index[n1];
+		int ind2 = tree.index[n2];
+		int mlt1 = tree.mult[n1];
+		int mlt2 = tree.mult[n2];
+		const VEC *p1 = p + ind1;
+		const VEC *p2 = p + ind2;
+
+		fmm_p2p_interaction(a + ind1, p1, p2, mlt1, mlt2, d_EPS2);
+		fmm_p2p_interaction(a + ind2, p2, p1, mlt2, mlt1, d_EPS2);
+	}
+#endif
+}
+
+inline __device__ void fmm_p2p3_kdtree_coalesced_krnl(VEC *__restrict__ a, const fmmTree_kd tree, const VEC *__restrict__ p,
+                                                      const int2 *p2p_list, const int *p2p_n, int mlt_max, SCAL d_EPS2)
+// particle to particle interaction
+{
+	extern __shared__ VEC smem[];
+	VEC *sp2 = smem;
+	VEC *sa2 = smem + mlt_max;
+
+	for (int i = blockIdx.x; i < *p2p_n; i += gridDim.x)
+	{
+		int n1 = p2p_list[i].x;
+		int n2 = p2p_list[i].y;
+
+		int ind1 = tree.index[n1];
+		int ind2 = tree.index[n2];
+		int mlt1 = tree.mult[n1];
+		int mlt2 = tree.mult[n2];
+		const VEC *p1 = p + ind1;
+		const VEC *p2 = p + ind2;
+		VEC *a1 = a + ind1;
+		VEC *a2 = a + ind2;
+
+		for (int g = threadIdx.x; g < mlt2; g += blockDim.x)
+			sp2[g] = p2[g];
+
+		for (int g = threadIdx.x; g < mlt2; g += blockDim.x)
+			sa2[g] = VEC{};
+
+		__syncthreads();
+
+		for (int h = threadIdx.x; h < mlt1; h += blockDim.x)
+		{
+			VEC atmp{};
+			for (int g = 0; g < mlt2; ++g)
+			{
+				int gg = (g+threadIdx.x) % mlt2;
+				VEC d = p1[h] - sp2[gg];
+				SCAL k = dot(d, d) + d_EPS2;
+				k = (SCAL)1 / k;
+				k *= sqrt(k);
+				d *= k;
+
+				atmp += d;
+				sa2[gg] -= d;
+			}
+			myAtomicAdd(&a1[h].x, atmp.x);
+			myAtomicAdd(&a1[h].y, atmp.y);
+			myAtomicAdd(&a1[h].z, atmp.z);
+		}
+		__syncthreads();
+
+		for (int g = threadIdx.x; g < mlt2; g += blockDim.x)
+		{
+			myAtomicAdd(&a2[g].x, sa2[g].x);
+			myAtomicAdd(&a2[g].y, sa2[g].y);
+			myAtomicAdd(&a2[g].z, sa2[g].z);
+		}
+		__syncthreads();
 	}
 }
 
 __global__ void fmm_p2p3_kdtree(VEC *__restrict__ a, const fmmTree_kd tree, const VEC *__restrict__ p,
-                                const int2 *p2p_list, const int *p2p_n, SCAL d_EPS2)
+                                const int2 *p2p_list, const int *p2p_n, int mlt_max, SCAL d_EPS2)
 {
-	fmm_p2p3_kdtree_krnl(a, tree, p, p2p_list, d_EPS2, blockDim.x * blockIdx.x + threadIdx.x, *p2p_n, gridDim.x * blockDim.x);
+	if (mlt_max < blockDim.x)
+		fmm_p2p3_kdtree_krnl(a, tree, p, p2p_list, mlt_max, d_EPS2, blockDim.x * blockIdx.x + threadIdx.x, *p2p_n, gridDim.x * blockDim.x);
+	else
+		fmm_p2p3_kdtree_coalesced_krnl(a, tree, p, p2p_list, p2p_n, mlt_max, d_EPS2);
 }
 
 void fmm_p2p3_kdtree_cpu(VEC *__restrict__ a, const fmmTree_kd tree, const VEC *__restrict__ p,
-                         const int2 *p2p_list, const int *p2p_n, SCAL d_EPS2)
+                         const int2 *p2p_list, const int *p2p_n, int mlt_max, SCAL d_EPS2)
 {
 	std::vector<std::thread> threads(CPU_THREADS);
 	int niter = (*p2p_n-1)/CPU_THREADS+1;
 	for (int i = 0; i < CPU_THREADS; ++i)
-		threads[i] = std::thread(fmm_p2p3_kdtree_krnl, a, tree, p, p2p_list, d_EPS2, niter*i, std::min(niter*(i+1), *p2p_n), 1);
+		threads[i] = std::thread(fmm_p2p3_kdtree_krnl, a, tree, p, p2p_list, mlt_max, d_EPS2, niter*i, std::min(niter*(i+1), *p2p_n), 1);
+	for (int i = 0; i < CPU_THREADS; ++i)
+		threads[i].join();
+}
+
+inline __host__ __device__ void fmm_p2p3_self_kdtree_krnl(VEC *__restrict__ a, const fmmTree_kd tree, const VEC *__restrict__ p,
+                                                          int L, SCAL d_EPS2,
+                                                          int begi, int endi, int stride)
+// particle to particle interaction
+{
+	int beg = kd_beg(L);
+	int *index = tree.index + beg;
+	int *mult = tree.mult + beg;
+	for (int i = begi; i < endi; i += stride)
+	{
+		int ind = index[i];
+		int mlt = mult[i];
+		const VEC *pi = p + ind;
+
+		fmm_p2p_interaction(a + ind, pi, pi, mlt, mlt, d_EPS2);
+	}
+}
+
+__global__ void fmm_p2p3_self_kdtree(VEC *__restrict__ a, const fmmTree_kd tree, const VEC *__restrict__ p, int L, SCAL d_EPS2)
+{
+	int m = kd_n(L);
+	fmm_p2p3_self_kdtree_krnl(a, tree, p, L, d_EPS2, blockDim.x * blockIdx.x + threadIdx.x, m, gridDim.x * blockDim.x);
+}
+
+void fmm_p2p3_self_kdtree_cpu(VEC *__restrict__ a, const fmmTree_kd tree, const VEC *__restrict__ p, int L, SCAL d_EPS2)
+{
+	std::vector<std::thread> threads(CPU_THREADS);
+	int m = kd_n(L);
+	int niter = (m-1)/CPU_THREADS+1;
+	for (int i = 0; i < CPU_THREADS; ++i)
+		threads[i] = std::thread(fmm_p2p3_self_kdtree_krnl, a, tree, p, L, d_EPS2, niter*i, std::min(niter*(i+1), m), 1);
 	for (int i = 0; i < CPU_THREADS; ++i)
 		threads[i].join();
 }
@@ -797,6 +958,10 @@ void fmm_cart3_kdtree(VEC *p, VEC *a, int n, const SCAL* param)
 			}
 			else
 			{
+				gpuErrchk(cudaDeviceSetLimit(cudaLimitStackSize, 262144));
+				size_t max_stack;
+				gpuErrchk(cudaDeviceGetLimit(&max_stack, cudaLimitStackSize));
+				std::cout << "max_stack: " << max_stack << std::endl;
 				gpuErrchk(cudaMalloc((void**)&d_minmax, sizeof(VEC)*2));
 				gpuErrchk(cudaMalloc((void**)&d_p2p_n, sizeof(int)*2));
 				d_m2l_n = d_p2p_n + 1;
@@ -833,10 +998,11 @@ void fmm_cart3_kdtree(VEC *p, VEC *a, int n, const SCAL* param)
 				gpuErrchk(cudaFree(d_m2l_list));
 				gpuErrchk(cudaFree(d_stack));
 			}
-			p2p_max = m2l_max = ntot*1000;
+			p2p_max = kd_n(L)*200;
+			m2l_max = kd_n(L)*200;
 			gpuErrchk(cudaMalloc((void**)&d_p2p_list, sizeof(int2)*p2p_max));
 			gpuErrchk(cudaMalloc((void**)&d_m2l_list, sizeof(int2)*m2l_max));
-			gpuErrchk(cudaMalloc((void**)&d_stack, sizeof(int2)*ntot));
+			gpuErrchk(cudaMalloc((void**)&d_stack, sizeof(int2)*ntot*10));
 		}
 	}
 
@@ -887,7 +1053,13 @@ void fmm_cart3_kdtree(VEC *p, VEC *a, int n, const SCAL* param)
 	rescale <<< nBlocks, BLOCK_SIZE >>> (a, n, param+1);
 
 	if (coll)
-		fmm_p2p3_kdtree <<< nBlocks, BLOCK_SIZE >>> (a, tree, p, d_p2p_list, d_p2p_n, EPS2);
+	{
+		int max_mlt = (n-1) / m + 1;
+		smemSize = 2*max_mlt*sizeof(VEC);
+
+		fmm_p2p3_kdtree <<< nBlocks, BLOCK_SIZE, smemSize >>> (a, tree, p, d_p2p_list, d_p2p_n, max_mlt, EPS2);
+		fmm_p2p3_self_kdtree <<< nBlocks, BLOCK_SIZE >>> (a, tree, p, L, EPS2);
+	}
 
 	smemSize = (4*tree.p+1)*BLOCK_SIZE*sizeof(SCAL);
 	fmm_c2c3_kdtree <<< nBlocks, BLOCK_SIZE, smemSize >>> (tree, d_m2l_list, d_m2l_n, EPS2);
@@ -1034,7 +1206,11 @@ void fmm_cart3_kdtree_cpu(VEC *p, VEC *a, int n, const SCAL* param)
 
 	int list_n = p2p_list.size();
 	if (coll)
-		fmm_p2p3_kdtree_cpu(a, tree, p, p2p_list.data(), &list_n, EPS2);
+	{
+		int max_mlt = (n-1) / m + 1;
+		std::cout << "max_mlt: " << max_mlt << std::endl;
+		fmm_p2p3_kdtree_cpu(a, tree, p, p2p_list.data(), &list_n, max_mlt, EPS2);
+	}
 
 	list_n = m2l_list.size();
 	fmm_c2c3_kdtree_cpu(tree, m2l_list.data(), &list_n, EPS2);

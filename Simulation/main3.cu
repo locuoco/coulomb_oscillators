@@ -17,15 +17,6 @@
 /*
 
 Compilation:
-	nvcc main.cu -o nbco -O3 -std=c++11 -arch=sm_<xy> -I <includes>
-<xy> is the compute capability of the GPU (usually given in the form x.y),
-for example sm_21 corresponds to a compute capability of 2.1.
-<includes> is the folder which contains the CUB library.
-Note: some CUDA versions may require the c++14 standard or later.
-	
-The resulting program will be called 'nbco'. A compatible C++ compilator must be
-available.
-
 nvcc main3.cu -o nbco3 -O3 -arch=sm_75 <std=c++20>
 
 Use '--std c++20' for Windows (Visual Studio 2022) or '-std=c++20' for Linux (GCC 10-12)

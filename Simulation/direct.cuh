@@ -24,14 +24,12 @@ inline __host__ __device__ VEC_T(SCAL, 2) kernel(VEC_T(SCAL, 2) a, VEC_T(SCAL, 2
 {
 	return fma(invDist2, d, a);
 }
-
 inline __host__ __device__ VEC_T(SCAL, 3) kernel(VEC_T(SCAL, 3) a, VEC_T(SCAL, 3) d, SCAL invDist2)
 {
 	SCAL invDist = sqrt(invDist2);
 	SCAL invDist3 = invDist2 * invDist;
 	return fma(invDist3, d, a);
 }
-
 inline __host__ __device__ VEC_T(SCAL, 4) kernel(VEC_T(SCAL, 4) a, VEC_T(SCAL, 4) d, SCAL invDist2)
 {
 	SCAL invDist4 = invDist2 * invDist2;
@@ -42,14 +40,12 @@ inline __host__ __device__ VEC_T(SCAL, 2) kernel(VEC_T(SCAL, 2) a, VEC_T(SCAL, 2
 {
 	return fma(invDist2*c, d, a);
 }
-
 inline __host__ __device__ VEC_T(SCAL, 3) kernel(VEC_T(SCAL, 3) a, VEC_T(SCAL, 3) d, SCAL invDist2, SCAL c)
 {
 	SCAL invDist = sqrt(invDist2);
 	SCAL invDist3 = invDist2 * invDist;
 	return fma(invDist3*c, d, a);
 }
-
 inline __host__ __device__ VEC_T(SCAL, 4) kernel(VEC_T(SCAL, 4) a, VEC_T(SCAL, 4) d, SCAL invDist2, SCAL c)
 {
 	SCAL invDist4 = invDist2 * invDist2;
