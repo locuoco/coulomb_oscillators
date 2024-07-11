@@ -39,10 +39,11 @@ SCAL EPS2 = (SCAL)1.e-18; // softening parameter squared
 int CPU_THREADS = 8; // number of concurrent threads in CPU
 int fmm_order = 2; // fast multipole method order
 int tree_radius = 1;
+int tree_L = 0;
 
 bool coll = true;
 
-SCAL dens_inhom = .1;
+SCAL dens_inhom = .5;
 
 template <typename T>
 inline __device__ T myAtomicAdd(T* address, T val)

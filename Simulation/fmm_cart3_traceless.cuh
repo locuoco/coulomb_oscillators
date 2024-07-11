@@ -245,7 +245,7 @@ inline __host__ __device__ void fmm_c2c3_traceless_krnl(fmmTree tree, int l, int
 						VEC d = tree.center[ijk1] - tree.center[ijk2];
 						SCAL r2 = dot(d, d) + d_EPS2;
 
-						static_m2l_acc3<1>(tree.local + ijk1*offL, tempi, tree.mpole + ijk2*offM, tree.p, d, r2);
+						static_m2l_acc3<1, -2>(tree.local + ijk1*offL, tempi, tree.mpole + ijk2*offM, tree.p, d, r2);
 					}
 		}
 	}

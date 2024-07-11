@@ -148,22 +148,19 @@ void test_accuracy(void(*test)(VEC*, VEC*, int, const SCAL*), void(*ref)(VEC*, V
 // print the mean relative error on console window
 {
 	static int nBlocksRed = 1;
-	static int n_prev = 0, n_max = 0;
+	static int n_max = 0;
 	static SCAL *d_relerr = nullptr;
 	static SCAL *relerr = new SCAL[nBlocksRed];
 	static VEC *d_tmp = nullptr;
-	if (n != n_prev)
+	if (n > n_max)
 	{
-		if (n > n_max)
+		if (n_max > 0)
 		{
-			if (n_max > 0)
-			{
-				gpuErrchk(cudaFree(d_tmp));
-				gpuErrchk(cudaFree(d_relerr));
-			}
-			gpuErrchk(cudaMalloc((void**)&d_tmp, sizeof(VEC)*n));
-			gpuErrchk(cudaMalloc((void**)&d_relerr, sizeof(SCAL)*nBlocksRed));
+			gpuErrchk(cudaFree(d_tmp));
+			gpuErrchk(cudaFree(d_relerr));
 		}
+		gpuErrchk(cudaMalloc((void**)&d_tmp, sizeof(VEC)*n));
+		gpuErrchk(cudaMalloc((void**)&d_relerr, sizeof(SCAL)*nBlocksRed));
 	}
 	compute_force(test, d_buf, n, param);
 	copy_gpu(d_tmp, (VEC*)d_buf + 2 * n, n);
@@ -179,7 +176,6 @@ void test_accuracy(void(*test)(VEC*, VEC*, int, const SCAL*), void(*ref)(VEC*, V
 
 	if (n > n_max)
 		n_max = n;
-	n_prev = n;
 }
 
 void test_accuracy_cpu(void(*test)(VEC*, VEC*, int, const SCAL*), void(*ref)(VEC*, VEC*, int, const SCAL*),
@@ -188,17 +184,14 @@ void test_accuracy_cpu(void(*test)(VEC*, VEC*, int, const SCAL*), void(*ref)(VEC
 // print the mean relative error on console window
 // both functions must run on CPU
 {
-	static int n_prev = 0, n_max = 0;
+	static int n_max = 0;
 	std::vector<SCAL> relerr(CPU_THREADS);
 	static VEC *tmp = nullptr;
-	if (n != n_prev)
+	if (n > n_max)
 	{
-		if (n > n_max)
-		{
-			if (n_max > 0)
-				delete[] tmp;
-			tmp = new VEC[n];
-		}
+		if (n_max > 0)
+			delete[] tmp;
+		tmp = new VEC[n];
 	}
 	compute_force(test, buf, n, param);
 	copy_cpu(tmp, (VEC*)buf + 2 * n, n);
@@ -224,7 +217,6 @@ void test_accuracy_cpu(void(*test)(VEC*, VEC*, int, const SCAL*), void(*ref)(VEC
 
 	if (n > n_max)
 		n_max = n;
-	n_prev = n;
 }
 
 int main(const int argc, const char** argv)
@@ -722,7 +714,7 @@ int main(const int argc, const char** argv)
 				  << duration_cast<microseconds>(end - begin).count() * (SCAL)1.e-6
 				  << " [s]" << std::endl;
 
-		for (fmm_order = 1; fmm_order <= 5; ++fmm_order)
+		for (fmm_order = 1; fmm_order <= 8; ++fmm_order)
 		{
 			std::cout << fmm_order << ": ";
 			if (cpu)
