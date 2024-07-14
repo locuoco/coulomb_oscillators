@@ -373,7 +373,7 @@ inline __host__ __device__ bool kd_admissible(const fmmTree_kd& tree, int n1, in
 }
 
 __global__ void fmm_dualTraversal(fmmTree_kd tree, int2 *p2p_list, int2 *m2l_list, int2 *stack, int *p2p_n, int *m2l_n,
-                                  int p2p_max, int m2l_max, int r, int L)
+                                  int p2p_max, int m2l_max, int stack_max, int r, int L)
 // call with CUDA gridsize = 1, 3 or 7
 {
 	int tid = threadIdx.x;
@@ -384,7 +384,7 @@ __global__ void fmm_dualTraversal(fmmTree_kd tree, int2 *p2p_list, int2 *m2l_lis
 	__shared__ int top;
 
 	int ntot = kd_ntot(L);
-	int stack_size = ntot*10/gdim;
+	int stack_size = stack_max/gdim;
 	int2 *block_stack = stack + stack_size*bid;
 
 	int2 np;
@@ -426,11 +426,12 @@ __global__ void fmm_dualTraversal(fmmTree_kd tree, int2 *p2p_list, int2 *m2l_lis
 		top = 1;
 	}
 
+	// Initialize counters
 	*p2p_n = 0;
 	*m2l_n = 0;
 
-	__threadfence();
-	__syncthreads();
+	__threadfence(); // Ensure memory writes are visible
+	__syncthreads(); // Ensure all threads wait for initialization
 
 	while (top > 0)
 	{
@@ -1000,7 +1001,7 @@ void fmm_cart3_kdtree(VEC *p, VEC *a, int n, const SCAL* param)
 	static VEC *d_tmp = nullptr;
 	static int2 *d_p2p_list = nullptr, *d_m2l_list = nullptr, *d_stack = nullptr;
 	static int *d_p2p_n = nullptr, *d_m2l_n = nullptr;
-	static int p2p_max = 0, m2l_max = 0, ntot = 0;
+	static int p2p_max = 0, m2l_max = 0, stack_max = 0, ntot = 0;
 	assert(n > BLOCK_SIZE);
 
 	if (n != n_prev || fmm_order != order)
@@ -1072,9 +1073,10 @@ void fmm_cart3_kdtree(VEC *p, VEC *a, int n, const SCAL* param)
 			}
 			p2p_max = std::min(ntot*100, 1024*1024*128);
 			m2l_max = std::min(ntot*100, 1024*1024*128);
+			stack_max = ntot*10;
 			gpuErrchk(cudaMalloc((void**)&d_p2p_list, sizeof(int2)*p2p_max)); // 1GB max
 			gpuErrchk(cudaMalloc((void**)&d_m2l_list, sizeof(int2)*m2l_max));
-			gpuErrchk(cudaMalloc((void**)&d_stack, sizeof(int2)*ntot*10));
+			gpuErrchk(cudaMalloc((void**)&d_stack, sizeof(int2)*stack_max));
 		}
 	}
 
@@ -1120,7 +1122,7 @@ void fmm_cart3_kdtree(VEC *p, VEC *a, int n, const SCAL* param)
 	for (int l = L-1; l >= 0; --l)
 		fmm_buildTree3_kdtree <<< nBlocks, BLOCK_SIZE, smemSize >>> (tree, l);
 
-	fmm_dualTraversal <<< 7, 256 >>> (tree, d_p2p_list, d_m2l_list, d_stack, d_p2p_n, d_m2l_n, p2p_max, m2l_max, radius, L);
+	fmm_dualTraversal <<< 7, 256 >>> (tree, d_p2p_list, d_m2l_list, d_stack, d_p2p_n, d_m2l_n, p2p_max, m2l_max, stack_max, radius, L);
 
 	rescale <<< nBlocks, BLOCK_SIZE >>> (a, n, param+1);
 
