@@ -374,33 +374,74 @@ inline __host__ __device__ bool kd_admissible(const fmmTree_kd& tree, int n1, in
 
 __global__ void fmm_dualTraversal(fmmTree_kd tree, int2 *p2p_list, int2 *m2l_list, int2 *stack, int *p2p_n, int *m2l_n,
                                   int p2p_max, int m2l_max, int r, int L)
-// call with CUDA gridsize = 1
+// call with CUDA gridsize = 1, 3 or 7
 {
+	int tid = threadIdx.x;
+	int bid = blockIdx.x;
+	int bdim = blockDim.x;
+	int gdim = gridDim.x;
+
 	__shared__ int top;
 
-	int2 np{0, 0};
 	int ntot = kd_ntot(L);
+	int stack_size = ntot*10/gdim;
+	int2 *block_stack = stack + stack_size*bid;
 
-	if (threadIdx.x == 0 && blockIdx.x == 0)
+	int2 np;
+
+	if (tid == 0)
 	{
-		stack[0] = np;
+		switch (gdim)
+		{
+			case 1:
+				block_stack[0] = {0, 0};
+				break;
+			case 3:
+				if (bid == 0)
+					block_stack[0] = {1, 1};
+				else if (bid == 1)
+					block_stack[0] = {1, 2};
+				else
+					block_stack[0] = {2, 2};
+				break;
+			case 7:
+				if (bid == 0)
+					block_stack[0] = {3, 3};
+				else if (bid == 1)
+					block_stack[0] = {3, 4};
+				else if (bid == 2)
+					block_stack[0] = {4, 4};
+				else if (bid == 3)
+					block_stack[0] = {1, 2};
+				else if (bid == 4)
+					block_stack[0] = {5, 5};
+				else if (bid == 5)
+					block_stack[0] = {5, 6};
+				else
+					block_stack[0] = {6, 6};
+				break;
+			default:
+				assert(false); // call with CUDA gridsize = 1, 3 or 7
+		}
 		top = 1;
-		*p2p_n = 0;
-		*m2l_n = 0;
 	}
 
+	*p2p_n = 0;
+	*m2l_n = 0;
+
+	__threadfence();
 	__syncthreads();
 
-	while (top > 0 && blockIdx.x == 0)
+	while (top > 0)
 	{
-		int stack_pos = top - threadIdx.x - 1;
+		int stack_pos = top - tid - 1;
 
 		if (stack_pos >= 0)
-			np = stack[stack_pos];
+			np = block_stack[stack_pos];
 
 		__syncthreads();
-		if (threadIdx.x == 0)
-			top = max(top - (int)blockDim.x, 0);
+		if (tid == 0)
+			top = max(top - bdim, 0);
 		__syncthreads();
 
 		if (stack_pos >= 0)
@@ -408,9 +449,9 @@ __global__ void fmm_dualTraversal(fmmTree_kd tree, int2 *p2p_list, int2 *m2l_lis
 			if (np.x == np.y & kd_lchild(np.x) < ntot)
 			{
 				int pos = atomicAdd(&top, 3);
-				stack[pos] = {kd_lchild(np.x), kd_lchild(np.x)};
-				stack[pos+1] = {kd_lchild(np.x), kd_rchild(np.x)};
-				stack[pos+2] = {kd_rchild(np.x), kd_rchild(np.x)};
+				block_stack[pos] = {kd_lchild(np.x), kd_lchild(np.x)};
+				block_stack[pos+1] = {kd_lchild(np.x), kd_rchild(np.x)};
+				block_stack[pos+2] = {kd_rchild(np.x), kd_rchild(np.x)};
 			}
 			else if (kd_admissible(tree, np.x, np.y, r))
 			{
@@ -432,14 +473,17 @@ __global__ void fmm_dualTraversal(fmmTree_kd tree, int2 *p2p_list, int2 *m2l_lis
 				bool cond = kd_lchild(np.x) >= ntot | (kd_lchild(np.y) < ntot
 					& kd_size(tree.lbound[np.x], tree.rbound[np.x]) <= kd_size(tree.lbound[np.y], tree.rbound[np.y]));
 				int pos = atomicAdd(&top, 2);
-				stack[pos] = cond ? int2{np.x, kd_lchild(np.y)} : int2{kd_lchild(np.x), np.y};
-				stack[pos+1] = cond ? int2{np.x, kd_rchild(np.y)} : int2{kd_rchild(np.x), np.y};
+				block_stack[pos] = cond ? int2{np.x, kd_lchild(np.y)} : int2{kd_lchild(np.x), np.y};
+				block_stack[pos+1] = cond ? int2{np.x, kd_rchild(np.y)} : int2{kd_rchild(np.x), np.y};
 			}
 		}
 		__syncthreads();
 	}
 
-	if (threadIdx.x == 0 && blockIdx.x == 0)
+	__threadfence();
+	__syncthreads();
+
+	if (tid == 0)
 	{
 		if (*p2p_n > p2p_max)
 		{
@@ -451,9 +495,6 @@ __global__ void fmm_dualTraversal(fmmTree_kd tree, int2 *p2p_list, int2 *m2l_lis
 			*m2l_n = m2l_max;
 			printf("\nexceeded m2l allocated memory\n");
 		}
-		//printf("i: %d\n", i);
-		//printf("p2p_n: %d\n", *p2p_n);
-		//printf("m2l_n: %d\n", *m2l_n);
 	}
 }
 
@@ -518,7 +559,7 @@ inline __host__ __device__ void fmm_c2c3_kdtree_krnl(fmmTree_kd tree, const int2
 		SCAL *loc2 = tree.local + n2*offL;
 		SCAL *mp1 = tree.mpole + n1*offM;
 		SCAL *mp2 = tree.mpole + n2*offM;
-		SCAL mm = mp1[0] / mp2[0];
+		//SCAL mm = mp1[0] / mp2[0];
 
 		VEC d = tree.center[n1] - tree.center[n2];
 		SCAL r2 = dot(d, d) + d_EPS2;
@@ -703,6 +744,7 @@ inline __device__ void fmm_p2p3_kdtree_coalesced_krnl(VEC *__restrict__ a, const
 
 		__syncthreads();
 
+		unsigned mask = __ballot_sync(0xFFFFFFFF, threadIdx.x < mlt1);
 		for (int h = threadIdx.x; h < mlt1; h += blockDim.x)
 		{
 			VEC atmp{};
@@ -717,10 +759,12 @@ inline __device__ void fmm_p2p3_kdtree_coalesced_krnl(VEC *__restrict__ a, const
 
 				atmp += d;
 				sa2[gg] -= d;
+				__syncwarp(mask);
 			}
 			myAtomicAdd(&a1[h].x, atmp.x);
 			myAtomicAdd(&a1[h].y, atmp.y);
 			myAtomicAdd(&a1[h].z, atmp.z);
+			mask = __ballot_sync(mask, h+blockDim.x < mlt1);
 		}
 		__syncthreads();
 
@@ -737,7 +781,7 @@ inline __device__ void fmm_p2p3_kdtree_coalesced_krnl(VEC *__restrict__ a, const
 __global__ void fmm_p2p3_kdtree(VEC *__restrict__ a, const fmmTree_kd tree, const VEC *__restrict__ p,
                                 const int2 *p2p_list, const int *p2p_n, int mlt_max, SCAL d_EPS2)
 {
-	if (blockDim.x > 32 || mlt_max < blockDim.x)
+	if (blockDim.x > 32 || mlt_max <= blockDim.x)
 		fmm_p2p3_kdtree_krnl(a, tree, p, p2p_list, mlt_max, d_EPS2, blockDim.x * blockIdx.x + threadIdx.x, *p2p_n, gridDim.x * blockDim.x);
 	else
 		fmm_p2p3_kdtree_coalesced_krnl(a, tree, p, p2p_list, p2p_n, mlt_max, d_EPS2);
@@ -1076,7 +1120,7 @@ void fmm_cart3_kdtree(VEC *p, VEC *a, int n, const SCAL* param)
 	for (int l = L-1; l >= 0; --l)
 		fmm_buildTree3_kdtree <<< nBlocks, BLOCK_SIZE, smemSize >>> (tree, l);
 
-	fmm_dualTraversal <<< 1, 1024 >>> (tree, d_p2p_list, d_m2l_list, d_stack, d_p2p_n, d_m2l_n, p2p_max, m2l_max, radius, L);
+	fmm_dualTraversal <<< 7, 256 >>> (tree, d_p2p_list, d_m2l_list, d_stack, d_p2p_n, d_m2l_n, p2p_max, m2l_max, radius, L);
 
 	rescale <<< nBlocks, BLOCK_SIZE >>> (a, n, param+1);
 
