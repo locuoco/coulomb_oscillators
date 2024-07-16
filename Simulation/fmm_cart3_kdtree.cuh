@@ -1394,8 +1394,8 @@ void fmm_cart3_kdtree_cpu(VEC *p, VEC *a, int n, const SCAL* param)
 	if (coll)
 	{
 		int max_mlt = (n-1) / m + 1;
-		std::cout << "max_mlt: " << max_mlt << std::endl;
 		fmm_p2p3_kdtree_cpu(a, tree, p, p2p_list.data(), &list_n, max_mlt, EPS2);
+		fmm_p2p3_self_kdtree_cpu(a, tree, p, L, EPS2);
 	}
 
 	list_n = m2l_list.size();
