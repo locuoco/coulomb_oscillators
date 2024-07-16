@@ -714,7 +714,7 @@ int main(const int argc, const char** argv)
 				  << duration_cast<microseconds>(end - begin).count() * (SCAL)1.e-6
 				  << " [s]" << std::endl;
 
-		for (fmm_order = 1; fmm_order <= 8; ++fmm_order)
+		for (fmm_order = 1; fmm_order <= 10; ++fmm_order)
 		{
 			std::cout << fmm_order << ": ";
 			if (cpu)

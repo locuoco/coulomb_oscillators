@@ -236,9 +236,13 @@ __global__ void direct3_krnl(const VEC *p, VEC *a, int n, const SCAL* param, SCA
 void direct3(VEC *p, VEC *a, int n, const SCAL* param)
 {
 	assert(n > 0);
-	int nBlocks = std::min(MAX_GRID_SIZE, (n + BLOCK_SIZE - 1) / BLOCK_SIZE);
-	direct3_krnl <<< nBlocks, BLOCK_SIZE >>> (p, a, n, param, EPS2);
-	
+	static int gridsize = 0, blocksize = 0;
+	if (blocksize == 0)
+		gpuErrchk(cudaOccupancyMaxPotentialBlockSize(&gridsize, &blocksize, direct3_krnl));
+
+	int nBlocks = std::min(gridsize, (n-1)/blocksize+1);
+	direct3_krnl <<< nBlocks, blocksize >>> (p, a, n, param, EPS2);
+
 	gpuErrchk(cudaPeekAtLastError());
 	gpuErrchk(cudaDeviceSynchronize());
 }

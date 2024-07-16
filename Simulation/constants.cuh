@@ -41,9 +41,11 @@ int fmm_order = 2; // fast multipole method order
 int tree_radius = 1;
 int tree_L = 0;
 
+__device__ int *d_fmm_order;
+
 bool coll = true;
 
-SCAL dens_inhom = .5;
+SCAL dens_inhom = 2;
 
 template <typename T>
 inline __device__ T myAtomicAdd(T* address, T val)
