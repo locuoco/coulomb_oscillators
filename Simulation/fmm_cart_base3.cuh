@@ -1208,12 +1208,12 @@ inline __host__ __device__ void static_m2l_acc3(SCAL *__restrict__ Ltuple, SCAL 
 		case 3:
 			static_m2l_acc3_<3, minm, maxm, traceless, b_atomic>(Ltuple, temp, Mtuple, d, r2);
 			break;
-		/*case 4:
+		case 4:
 			static_m2l_acc3_<4, minm, maxm, traceless, b_atomic>(Ltuple, temp, Mtuple, d, r2);
 			break;
 		case 5:
 			static_m2l_acc3_<5, minm, maxm, traceless, b_atomic>(Ltuple, temp, Mtuple, d, r2);
-			break;*/
+			break;
 		default:
 			if (traceless)
 				m2l_traceless_acc3<b_atomic>(Ltuple, temp, Mtuple, N, N, d, r2, minm, (maxm == -2) ? N : maxm);

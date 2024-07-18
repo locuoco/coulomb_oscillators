@@ -19,6 +19,8 @@
 
 #include "kernel.cuh"
 
+#include <cub/cub.cuh>
+
 #if DIM == 2
 #define ONES_VEC VEC{1,1}
 #elif DIM == 3
@@ -29,7 +31,84 @@
 
 bool isPow2(unsigned int x)
 {
-    return ((x&(x-1))==0);
+    return (x&(x-1))==0;
+}
+
+struct MinMaxVec
+{
+	SCAL xmin, ymin, zmin, xmax, ymax, zmax;
+};
+
+struct MinMax
+{
+	__host__ __device__ __forceinline__ MinMaxVec operator()(const MinMaxVec& a, const MinMaxVec& b) const
+	{
+		return MinMaxVec{
+			min(a.xmin, b.xmin), min(a.ymin, b.ymin), min(a.zmin, b.zmin),
+			max(a.xmax, b.xmax), max(a.ymax, b.ymax), max(a.zmax, b.zmax)
+		};
+	}
+};
+
+template <int blockSize>
+__global__ void minmaxReduce2_krnl(VEC *__restrict__ minmax_, const VEC *__restrict__ x, int n)
+{
+	using BlockReduceT = cub::BlockReduce<MinMaxVec, blockSize>;
+	__shared__ typename BlockReduceT::TempStorage temp_storage;
+
+	int tid = threadIdx.x;
+	int gid = gridDim.x * blockIdx.x + tid;
+
+	MinMaxVec result, data;
+	if (gid < n)
+		data = {x[gid].x, x[gid].y, x[gid].z, x[gid].x, x[gid].y, x[gid].z};
+	else
+		data = {FLT_MAX, FLT_MAX, FLT_MAX, -FLT_MAX, -FLT_MAX, -FLT_MAX};
+
+	result = BlockReduceT(temp_storage).Reduce(data, MinMax());
+
+	if (tid == 0)
+	{
+		myAtomicMin(&minmax_[0].x, result.xmin);
+		myAtomicMin(&minmax_[0].y, result.ymin);
+		myAtomicMin(&minmax_[0].z, result.zmin);
+
+		myAtomicMax(&minmax_[1].x, result.xmax);
+		myAtomicMax(&minmax_[1].y, result.ymax);
+		myAtomicMax(&minmax_[1].z, result.zmax);
+	}
+}
+
+void minmaxReduce2(VEC *minmax, const VEC *src, unsigned int n)
+{
+	int nBlocks = (n-1)/1024 + 1;
+	minmaxReduce2_krnl<1024> <<< nBlocks, 1024 >>> (minmax, src, n);
+}
+
+template <int blockSize>
+__global__ void relerrReduce2_krnl(SCAL *__restrict__ relerr, const VEC *__restrict__ x, const VEC *__restrict__ xref, int n)
+{
+	using BlockReduceT = cub::BlockReduce<SCAL, blockSize>;
+	__shared__ typename BlockReduceT::TempStorage temp_storage;
+
+	int tid = threadIdx.x;
+	int gid = gridDim.x * blockIdx.x + tid;
+
+	SCAL result;
+	if (gid < n)
+	{
+		VEC diff = x[gid]-xref[gid];
+		result = BlockReduceT(temp_storage).Sum(dot(diff, diff) / dot(xref[gid], xref[gid]));
+	}
+
+	if (tid == 0)
+		myAtomicAdd(relerr, result);
+}
+
+void relerrReduce2(SCAL *relerr, const VEC *x, const VEC *xref, unsigned int n)
+{
+	int nBlocks = (n-1)/1024 + 1;
+	relerrReduce2_krnl<1024> <<< nBlocks, 1024 >>> (relerr, x, xref, n);
 }
 
 template <int blockSize, bool nIsPow2>

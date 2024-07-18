@@ -38,7 +38,7 @@ SCAL EPS2 = (SCAL)1.e-18; // softening parameter squared
 
 int CPU_THREADS = 8; // number of concurrent threads in CPU
 int fmm_order = 2; // fast multipole method order
-int tree_radius = 1;
+SCAL tree_radius = 1;
 int tree_L = 0;
 
 __device__ int *d_fmm_order;
@@ -55,10 +55,10 @@ inline __device__ T myAtomicAdd(T* address, T val)
 
 #if __CUDA_ARCH__ < 600
 
-__device__ double myAtomicAdd(double* address, double val)
+inline __device__ double myAtomicAdd(double* address, double val)
 {
-    unsigned long long int* address_as_ull = (unsigned long long int*)address;
-    unsigned long long int old = *address_as_ull, assumed;
+    unsigned long long* address_as_ull = (unsigned long long*)address;
+    unsigned long long old = *address_as_ull, assumed;
     do {
         assumed = old;
         old = atomicCAS(address_as_ull, assumed, 
@@ -69,6 +69,39 @@ __device__ double myAtomicAdd(double* address, double val)
 }
 
 #endif // __CUDA_ARCH__ < 600
+
+template <typename T>
+inline __device__ T myAtomicMin(T* address, T val)
+{
+	return atomicMin(address, val);
+}
+template <typename T>
+inline __device__ T myAtomicMax(T* address, T val)
+{
+	return atomicMax(address, val);
+}
+
+inline __device__ float myAtomicMin(float* address, float val)
+{
+	return !signbit(val) ? __int_as_float(atomicMin((int*)address, __float_as_int(val)))
+		: __uint_as_float(atomicMax((unsigned*)address, __float_as_uint(val)));
+}
+inline __device__ float myAtomicMax(float* address, float val)
+{
+	return !signbit(val) ? __int_as_float(atomicMax((int*)address, __float_as_int(val)))
+		: __uint_as_float(atomicMin((unsigned*)address, __float_as_uint(val)));
+}
+
+inline __device__ double myAtomicMin(double* address, double val)
+{
+	return !signbit(val) ? __longlong_as_double(atomicMin((long long*)address, __double_as_longlong(val)))
+		: __longlong_as_double(atomicMax((unsigned long long*)address, (unsigned long long)__double_as_longlong(val)));
+}
+inline __device__ double myAtomicMax(double* address, double val)
+{
+	return !signbit(val) ? __longlong_as_double(atomicMax((long long*)address, __double_as_longlong(val)))
+		: __longlong_as_double(atomicMin((unsigned long long*)address, (unsigned long long)__double_as_longlong(val)));
+}
 
 #endif // !CONSTANTS_CUDA_H
 

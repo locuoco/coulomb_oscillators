@@ -142,7 +142,7 @@ void initGA(VEC *data, int n, VEC x, VEC u, std::mt19937_64 &gen)
 	adjustRMS(data, nBodies, u);
 }
 
-void test_accuracy(void(*test)(VEC*, VEC*, int, const SCAL*), void(*ref)(VEC*, VEC*, int, const SCAL*),
+SCAL test_accuracy(void(*test)(VEC*, VEC*, int, const SCAL*), void(*ref)(VEC*, VEC*, int, const SCAL*),
 				   SCAL *d_buf, int n, const SCAL* param)
 // test the accuracy of "test" function with respect to the reference "ref" function
 // print the mean relative error on console window
@@ -172,13 +172,13 @@ void test_accuracy(void(*test)(VEC*, VEC*, int, const SCAL*), void(*ref)(VEC*, V
 	for (int i = 1; i < nBlocksRed; ++i)
 		relerr[0] += relerr[i];
 
-	std::cout << "Relative error: " << relerr[0] / (SCAL)n << std::endl;
-
 	if (n > n_max)
 		n_max = n;
+
+	return relerr[0] / (SCAL)n;
 }
 
-void test_accuracy_cpu(void(*test)(VEC*, VEC*, int, const SCAL*), void(*ref)(VEC*, VEC*, int, const SCAL*),
+SCAL test_accuracy_cpu(void(*test)(VEC*, VEC*, int, const SCAL*), void(*ref)(VEC*, VEC*, int, const SCAL*),
 					   SCAL *buf, int n, const SCAL* param)
 // test the accuracy of "test" function with respect to the reference "ref" function
 // print the mean relative error on console window
@@ -213,10 +213,10 @@ void test_accuracy_cpu(void(*test)(VEC*, VEC*, int, const SCAL*), void(*ref)(VEC
 	for (int i = 1; i < CPU_THREADS; ++i)
 		relerr[0] += relerr[i];
 
-	std::cout << "Relative error: " << relerr[0] / (SCAL)n << std::endl;
-
 	if (n > n_max)
 		n_max = n;
+
+	return relerr[0] / (SCAL)n;
 }
 
 int main(const int argc, const char** argv)
@@ -229,7 +229,8 @@ int main(const int argc, const char** argv)
 	int nIters = 30001;  // simulation iterations
 	int nSteps = 200;  // number of steps for every "snapshot" saved to file
 	std::string strout("out"), strin;
-	bool in = false, cpu = false, test = false;
+	bool in = false, cpu = false, test = false, b_accuracy = false;
+	SCAL accuracy = 0.001;
 	
 	auto symp_integ = leapfrog;
 	
@@ -272,15 +273,21 @@ int main(const int argc, const char** argv)
 							 "                    default one (2nd order). <name> must be chosen from the\n"
 							 "                    list {eu, fr, pefrl}, respectively the semi-implicit Euler\n"
 							 "                    (1st order), Forest-Ruth (4th order) and PEFRL (4th order).\n"
-							 "  -p <order>        FMM expansion order. Default is 2.\n"
+							 "  -p <order>        FMM expansion order. Default is 2. Will be ignored if\n"
+							 "                    -accuracy is specified.\n"
 							 "  -r <radius>       Interaction radius. Must be 1 or greater. Default is 1.\n"
+							 "                    Will be ignored if -accuracy is specified.\n"
 							 "  -eps <v>          Smoothing factor. Must be greater than 0. Default is 1e-9.\n"
 							 "  -i <v>            A factor so that max FMM level is round(log(n*i/p^2)).\n"
-							 "                    Default is 10.\n"
+							 "                    Default is 10. Will be ignored if -accuracy is specified.\n"
 							 "  -ncoll            P2P pass will not be calculated, effectively ignoring\n"
 							 "                    collisional effects. Note however that the result will\n"
 							 "                    depend on the max FMM level, and the simulation may be\n"
-							 "                    highly unreliable at certain conditions.\n"
+							 "                    highly unreliable at certain conditions. Will be ignored\n"
+							 "                    if -accuracy is specified.\n"
+							 "  -accuracy <v>     Set minimum accuracy for the simulation. The program will\n"
+							 "                    search optimized parameters that satisfy this condition.\n"
+							 "                    This ignores -p, -r, -i and -ncoll options.\n"
 							 "  -cpu              Use CPU with multithreading (default is GPU).\n"
 							 "  -cpu-threads <n>  Number of CPU threads. Must be 1 or greater (default is 8).\n"
 							 "                    Implies -cpu.\n"
@@ -418,7 +425,7 @@ int main(const int argc, const char** argv)
 					std::cerr << "Error: missing argument to '-r'\n";
 					return -1;
 				}
-				tree_radius = atoi(argv[i+1]);
+				tree_radius = atof(argv[i+1]);
 				if (tree_radius <= 0)
 				{
 					std::cerr << "Error: invalid argument to '-r': " << argv[i+1] << '\n';
@@ -465,6 +472,23 @@ int main(const int argc, const char** argv)
 			else if (argv[i][1] == 'n' && argv[i][2] == 'c' && argv[i][3] == 'o' && argv[i][4] == 'l' && argv[i][5] == 'l'
 				  && argv[i][6] == '\0')
 				coll = false;
+			else if (argv[i][1] == 'a' && argv[i][2] == 'c' && argv[i][3] == 'c' && argv[i][4] == 'u' && argv[i][5] == 'r'
+				  && argv[i][6] == 'a' && argv[i][7] == 'c' && argv[i][8] == 'y' && argv[i][9] == '\0')
+			{
+				if (i+1 >= argc)
+				{
+					std::cerr << "Error: missing argument to '-accuracy'\n";
+					return -1;
+				}
+				b_accuracy = true;
+				accuracy = atof(argv[i+1]);
+				if (accuracy <= 0)
+				{
+					std::cerr << "Error: invalid argument to '-accuracy': " << argv[i+1] << " (should be greater than 0)\n";
+					return -1;
+				}
+				++i;
+			}
 			else if (argv[i][1] == 'c' && argv[i][2] == 'p' && argv[i][3] == 'u' && argv[i][4] == '\0')
 				cpu = true;
 			else if (argv[i][1] == 'c' && argv[i][2] == 'p' && argv[i][3] == 'u' && argv[i][4] == '-' && argv[i][5] == 't'
@@ -673,8 +697,8 @@ int main(const int argc, const char** argv)
 	
 	SCAL par[]{
 		xi/(SCAL)nBodies, // xi/N
-		0, // padding, needed for memory alignment
-		0, // padding, needed for memory alignment
+		0, // padding
+		0, // padding
 		omega0.x*omega0.x, // omegax0^2 = kx
 		omega0.y*omega0.y, // omegay0^2 = ky
 		omega0.z*omega0.z, // omegay0^2 = kz
@@ -693,7 +717,7 @@ int main(const int argc, const char** argv)
 		gpuErrchk(cudaMemcpy(d_par, par, 6*sizeof(SCAL), cudaMemcpyHostToDevice));
 	}
 
-	if (test)
+	auto test_time = [cpu, nBodies, buf, par, d_buf, d_par]()
 	{
 		// warming up
 		if (cpu)
@@ -701,26 +725,90 @@ int main(const int argc, const char** argv)
 		else
 			compute_force(fmm_cart3_kdtree, d_buf, nBodies, d_par);
 
+		int loop_n = 3;
 		auto begin = steady_clock::now();
 
-		if (cpu)
-			compute_force(fmm_cart3_kdtree_cpu, buf, nBodies, par);
-		else
-			compute_force(fmm_cart3_kdtree, d_buf, nBodies, d_par);
+		for (int i = 0; i < loop_n; ++i)
+			if (cpu)
+				compute_force(fmm_cart3_kdtree_cpu, buf, nBodies, par);
+			else
+				compute_force(fmm_cart3_kdtree, d_buf, nBodies, d_par);
 
 		auto end = steady_clock::now();
 
-		std::cout << "Time elapsed: "
-				  << duration_cast<microseconds>(end - begin).count() * (SCAL)1.e-6
+		return duration_cast<microseconds>(end - begin).count() * (SCAL)1.e-6 / loop_n;
+	};
+
+	if (b_accuracy)
+	{
+		std::vector<SCAL> search_i = {.5, 1, 2};
+		std::vector<int> search_p = {1, 2, 3, 4, 5, 6, 8, 10};
+		std::vector<SCAL> search_r = {1, 2, 3};
+
+		SCAL best_i, best_r, best_time = FLT_MAX, best_accuracy, curr_accuracy, curr_time;
+		int best_p;
+
+		for (SCAL i : search_i)
+			for (SCAL r : search_r)
+				for (int p : search_p)
+				{
+					::dens_inhom = i;
+					::tree_radius = r;
+					::fmm_order = p;
+
+					if (cpu)
+						curr_accuracy = test_accuracy_cpu(fmm_cart3_kdtree_cpu, direct3_cpu, buf, nBodies, par);
+					else
+						curr_accuracy = test_accuracy(fmm_cart3_kdtree, direct3, d_buf, nBodies, d_par);
+
+					if (curr_accuracy < accuracy)
+					{
+						curr_time = test_time();
+						if (curr_time < best_time)
+						{
+							best_i = i;
+							best_r = r;
+							best_p = p;
+							best_accuracy = curr_accuracy;
+							best_time = curr_time;
+						}
+					}
+				}
+		if (best_time == FLT_MAX)
+		{
+			std::cout << "Optimization failed!" << std::endl;
+			return -1;
+		}
+		else
+		{
+			::dens_inhom = best_i;
+			::tree_radius = best_r;
+			::fmm_order = best_p;
+			std::cout << "Best parameters: ";
+			std::cout << "i = " << best_i;
+			std::cout << ", r = " << best_r;
+			std::cout << ", p = " << best_p;
+			std::cout << ", time = " << best_time << std::endl;
+		}
+	}
+
+	if (test)
+	{
+		std::cout << "Average time: "
+				  << test_time()
 				  << " [s]" << std::endl;
 
 		for (fmm_order = 1; fmm_order <= 10; ++fmm_order)
 		{
+			SCAL relerr;
 			std::cout << fmm_order << ": ";
+
 			if (cpu)
-				test_accuracy_cpu(fmm_cart3_kdtree_cpu, direct3_cpu, buf, nBodies, par);
+				relerr = test_accuracy_cpu(fmm_cart3_kdtree_cpu, direct3_cpu, buf, nBodies, par);
 			else
-				test_accuracy(fmm_cart3_kdtree, direct3, d_buf, nBodies, d_par);
+				relerr = test_accuracy(fmm_cart3_kdtree, direct3, d_buf, nBodies, d_par);
+
+			std::cout << "Relative error: " << relerr << std::endl;
 		}
 	}
 	else
