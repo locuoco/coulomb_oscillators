@@ -226,7 +226,7 @@ void elastic_cpu(VEC *__restrict__ p, VEC *__restrict__ a, int n, const SCAL* pa
 }
 
 template<typename T>
-__global__ void gather_krnl(T *__restrict__ dst, const T *__restrict__ src, const int *map, int n)
+__global__ void gather_krnl(T *__restrict__ dst, const T *__restrict__ src, const int *__restrict__ map, int n)
 // dst array is built from src array through the map pointer
 {
     for (int i = blockDim.x * blockIdx.x + threadIdx.x;
@@ -238,7 +238,7 @@ __global__ void gather_krnl(T *__restrict__ dst, const T *__restrict__ src, cons
 }
 
 template<typename T>
-void gather_cpu(T *__restrict__ dst, const T *__restrict__ src, const int *map, int n)
+void gather_cpu(T *__restrict__ dst, const T *__restrict__ src, const int *__restrict__ map, int n)
 {
 	std::vector<std::thread> threads(CPU_THREADS);
 	int niter = (n-1)/CPU_THREADS+1;
@@ -246,6 +246,32 @@ void gather_cpu(T *__restrict__ dst, const T *__restrict__ src, const int *map, 
 		threads[i] = std::thread([=]{
 			for (int j = niter*i; j < std::min(niter*(i+1), n); ++j)
 				dst[j] = src[map[j]];
+		});
+	for (int i = 0; i < CPU_THREADS; ++i)
+		threads[i].join();
+}
+
+template<typename T>
+__global__ void gather_inverse_krnl(T *__restrict__ dst, const T *__restrict__ src, const int *__restrict__ map, int n)
+// dst array is built from src array through the inverse of map pointer
+{
+    for (int i = blockDim.x * blockIdx.x + threadIdx.x;
+		 i < n;
+		 i += gridDim.x * blockDim.x)
+	{
+        dst[map[i]] = src[i];
+	}
+}
+
+template<typename T>
+void gather_inverse_cpu(T *__restrict__ dst, const T *__restrict__ src, const int *__restrict__ map, int n)
+{
+	std::vector<std::thread> threads(CPU_THREADS);
+	int niter = (n-1)/CPU_THREADS+1;
+	for (int i = 0; i < CPU_THREADS; ++i)
+		threads[i] = std::thread([=]{
+			for (int j = niter*i; j < std::min(niter*(i+1), n); ++j)
+				dst[map[j]] = src[j];
 		});
 	for (int i = 0; i < CPU_THREADS; ++i)
 		threads[i].join();

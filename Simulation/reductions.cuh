@@ -50,6 +50,12 @@ struct MinMax
 	}
 };
 
+__global__ void minmaxReduce2Init_krnl(VEC *minmax)
+{
+	minmax[0] = {FLT_MAX, FLT_MAX, FLT_MAX};
+	minmax[1] = {-FLT_MAX, -FLT_MAX, -FLT_MAX};
+}
+
 template <int blockSize>
 __global__ void minmaxReduce2_krnl(VEC *__restrict__ minmax_, const VEC *__restrict__ x, int n)
 {
@@ -82,6 +88,7 @@ __global__ void minmaxReduce2_krnl(VEC *__restrict__ minmax_, const VEC *__restr
 void minmaxReduce2(VEC *minmax, const VEC *src, unsigned int n)
 {
 	int nBlocks = (n-1)/1024 + 1;
+	minmaxReduce2Init_krnl <<< 1, 1 >>> (minmax);
 	minmaxReduce2_krnl<1024> <<< nBlocks, 1024 >>> (minmax, src, n);
 }
 
@@ -108,6 +115,7 @@ __global__ void relerrReduce2_krnl(SCAL *__restrict__ relerr, const VEC *__restr
 void relerrReduce2(SCAL *relerr, const VEC *x, const VEC *xref, unsigned int n)
 {
 	int nBlocks = (n-1)/1024 + 1;
+	cudaMemset(relerr, 0, sizeof(SCAL));
 	relerrReduce2_krnl<1024> <<< nBlocks, 1024 >>> (relerr, x, xref, n);
 }
 

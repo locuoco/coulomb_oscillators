@@ -43,7 +43,7 @@ int tree_L = 0;
 
 __device__ int *d_fmm_order;
 
-bool coll = true;
+bool coll = true, b_unsort = false;
 
 SCAL dens_inhom = 2;
 

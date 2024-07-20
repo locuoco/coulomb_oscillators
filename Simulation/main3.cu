@@ -143,16 +143,15 @@ void initGA(VEC *data, int n, VEC x, VEC u, std::mt19937_64 &gen)
 }
 
 SCAL test_accuracy(void(*test)(VEC*, VEC*, int, const SCAL*), void(*ref)(VEC*, VEC*, int, const SCAL*),
-				   SCAL *d_buf, int n, const SCAL* param)
+				   SCAL *d_buf, int n, const SCAL* param, bool b_update = false)
 // test the accuracy of "test" function with respect to the reference "ref" function
 // print the mean relative error on console window
 {
-	static int nBlocksRed = 1;
 	static int n_max = 0;
 	static SCAL *d_relerr = nullptr;
-	static SCAL *relerr = new SCAL[nBlocksRed];
+	static SCAL relerr;
 	static VEC *d_tmp = nullptr;
-	if (n > n_max)
+	if (n > n_max || b_update)
 	{
 		if (n_max > 0)
 		{
@@ -160,22 +159,20 @@ SCAL test_accuracy(void(*test)(VEC*, VEC*, int, const SCAL*), void(*ref)(VEC*, V
 			gpuErrchk(cudaFree(d_relerr));
 		}
 		gpuErrchk(cudaMalloc((void**)&d_tmp, sizeof(VEC)*n));
-		gpuErrchk(cudaMalloc((void**)&d_relerr, sizeof(SCAL)*nBlocksRed));
+		gpuErrchk(cudaMalloc((void**)&d_relerr, sizeof(SCAL)));
+
+		compute_force(ref, d_buf, n, param);
+		copy_gpu(d_tmp, (VEC*)d_buf + 2 * n, n);
 	}
 	compute_force(test, d_buf, n, param);
-	copy_gpu(d_tmp, (VEC*)d_buf + 2 * n, n);
-	compute_force(ref, d_buf, n, param);
-	relerrReduce(d_relerr, d_tmp, (VEC*)d_buf + 2 * n, n, nBlocksRed);
+	relerrReduce(d_relerr, (VEC*)d_buf + 2 * n, d_tmp, n);
 
-	gpuErrchk(cudaMemcpy(relerr, d_relerr, sizeof(SCAL)*nBlocksRed, cudaMemcpyDeviceToHost));
-
-	for (int i = 1; i < nBlocksRed; ++i)
-		relerr[0] += relerr[i];
+	gpuErrchk(cudaMemcpy(&relerr, d_relerr, sizeof(SCAL), cudaMemcpyDeviceToHost));
 
 	if (n > n_max)
 		n_max = n;
 
-	return relerr[0] / (SCAL)n;
+	return relerr / (SCAL)n;
 }
 
 SCAL test_accuracy_cpu(void(*test)(VEC*, VEC*, int, const SCAL*), void(*ref)(VEC*, VEC*, int, const SCAL*),
@@ -725,7 +722,7 @@ int main(const int argc, const char** argv)
 		else
 			compute_force(fmm_cart3_kdtree, d_buf, nBodies, d_par);
 
-		int loop_n = 3;
+		int loop_n = 1;
 		auto begin = steady_clock::now();
 
 		for (int i = 0; i < loop_n; ++i)
@@ -739,6 +736,8 @@ int main(const int argc, const char** argv)
 		return duration_cast<microseconds>(end - begin).count() * (SCAL)1.e-6 / loop_n;
 	};
 
+	::b_unsort = true;
+
 	if (b_accuracy)
 	{
 		std::vector<SCAL> search_i = {.5, 1, 2};
@@ -747,6 +746,10 @@ int main(const int argc, const char** argv)
 
 		SCAL best_i, best_r, best_time = FLT_MAX, best_accuracy, curr_accuracy, curr_time;
 		int best_p;
+
+		::coll = true;
+
+		std::cout << "Parameter optimization in progress, please wait" << std::flush;
 
 		for (SCAL i : search_i)
 			for (SCAL r : search_r)
@@ -773,10 +776,11 @@ int main(const int argc, const char** argv)
 							best_time = curr_time;
 						}
 					}
+					std::cout << '.' << std::flush;
 				}
 		if (best_time == FLT_MAX)
 		{
-			std::cout << "Optimization failed!" << std::endl;
+			std::cout << "\nOptimization failed!" << std::endl;
 			return -1;
 		}
 		else
@@ -784,7 +788,7 @@ int main(const int argc, const char** argv)
 			::dens_inhom = best_i;
 			::tree_radius = best_r;
 			::fmm_order = best_p;
-			std::cout << "Best parameters: ";
+			std::cout << "\nBest parameters: ";
 			std::cout << "i = " << best_i;
 			std::cout << ", r = " << best_r;
 			std::cout << ", p = " << best_p;
@@ -813,6 +817,8 @@ int main(const int argc, const char** argv)
 	}
 	else
 	{
+		::b_unsort = false;
+
 		// precompute accelerations
 		if (cpu)
 			compute_force(coulombOscillatorFMMKD3_cpu, buf, nBodies, par);

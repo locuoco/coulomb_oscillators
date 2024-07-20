@@ -57,20 +57,22 @@ __global__ void direct_krnl(const VEC *__restrict__ p, VEC *__restrict__ a, int 
 // direct force computation kernel
 // does not work properly for some values of n (boh?)
 {
-	extern __shared__ VEC spos[]; // shared memory
-	int i = blockDim.x * blockIdx.x + threadIdx.x;
+	__shared__ VEC spos[BlockSize]; // shared memory
 	int tid = threadIdx.x;
-	int Tiles = n / blockDim.x;
+	int Tiles = n / BlockSize;
 	SCAL k = (SCAL)1;
 	if (param != nullptr)
 		k = param[0];
-	while (i < n)
+
+	for (int i = BlockSize * blockIdx.x + threadIdx.x;
+		i < n; 
+		i += gridDim.x * blockDim.x)
 	{
 		VEC atmp{};
 
 		for (int tile = 0; tile < Tiles; ++tile)
 		{
-			spos[tid] = p[tile * blockDim.x + tid]; // read from global and write to shared mem
+			spos[tid] = p[tile * BlockSize + tid]; // read from global and write to shared mem
 			__syncthreads(); // wait that all threads in the current block are ready
 
 #pragma unroll
@@ -85,11 +87,11 @@ __global__ void direct_krnl(const VEC *__restrict__ p, VEC *__restrict__ a, int 
 			__syncthreads(); // wait that all threads in the current block have finished before writing
 			                 // in shared memory again
 		}
-		if (tid < n - Tiles * blockDim.x)
-			spos[tid] = p[Tiles * blockDim.x + tid];
+		if (tid < n - Tiles * BlockSize)
+			spos[tid] = p[Tiles * BlockSize + tid];
 		__syncthreads();
 		
-		for (int j = 0; j < n - Tiles * blockDim.x; ++j)
+		for (int j = 0; j < n - Tiles * BlockSize; ++j)
 		{
 			VEC d = p[i] - spos[j];
 			SCAL dist2 = dot(d, d) + d_EPS2;
@@ -100,36 +102,35 @@ __global__ void direct_krnl(const VEC *__restrict__ p, VEC *__restrict__ a, int 
 		__syncthreads();
 		
 		a[i] = k*atmp;
-		i += gridDim.x * blockDim.x;
 	}
 }
 
 void direct(VEC *p, VEC *a, int n, const SCAL* param)
 {
 	assert(n > 0);
-	int nBlocks = (n + BLOCK_SIZE - 1) / BLOCK_SIZE;
+	int nBlocks = (n-1) / BLOCK_SIZE + 1;
 	switch (BLOCK_SIZE)
 	{
 		case 1:
-			direct_krnl<1> <<< nBlocks, BLOCK_SIZE, BLOCK_SIZE*sizeof(VEC) >>> (p, a, n, param, EPS2);
+			direct_krnl<1> <<< nBlocks, BLOCK_SIZE >>> (p, a, n, param, EPS2);
 			break;
 		case 32:
-			direct_krnl<32> <<< nBlocks, BLOCK_SIZE, BLOCK_SIZE*sizeof(VEC) >>> (p, a, n, param, EPS2);
+			direct_krnl<32> <<< nBlocks, BLOCK_SIZE >>> (p, a, n, param, EPS2);
 			break;
 		case 64:
-			direct_krnl<64> <<< nBlocks, BLOCK_SIZE, BLOCK_SIZE*sizeof(VEC) >>> (p, a, n, param, EPS2);
+			direct_krnl<64> <<< nBlocks, BLOCK_SIZE >>> (p, a, n, param, EPS2);
 			break;
 		case 128:
-			direct_krnl<128> <<< nBlocks, BLOCK_SIZE, BLOCK_SIZE*sizeof(VEC) >>> (p, a, n, param, EPS2);
+			direct_krnl<128> <<< nBlocks, BLOCK_SIZE >>> (p, a, n, param, EPS2);
 			break;
 		case 256:
-			direct_krnl<256> <<< nBlocks, BLOCK_SIZE, BLOCK_SIZE*sizeof(VEC) >>> (p, a, n, param, EPS2);
+			direct_krnl<256> <<< nBlocks, BLOCK_SIZE >>> (p, a, n, param, EPS2);
 			break;
 		case 512:
-			direct_krnl<512> <<< nBlocks, BLOCK_SIZE, BLOCK_SIZE*sizeof(VEC) >>> (p, a, n, param, EPS2);
+			direct_krnl<512> <<< nBlocks, BLOCK_SIZE >>> (p, a, n, param, EPS2);
 			break;
 		case 1024:
-			direct_krnl<1024> <<< nBlocks, BLOCK_SIZE, BLOCK_SIZE*sizeof(VEC) >>> (p, a, n, param, EPS2);
+			direct_krnl<1024> <<< nBlocks, BLOCK_SIZE >>> (p, a, n, param, EPS2);
 			break;
 		default:
 			gpuErrchk((cudaError_t)!cudaSuccess);

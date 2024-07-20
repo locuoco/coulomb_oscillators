@@ -305,8 +305,6 @@ void fmm_cart3_traceless(VEC *p, VEC *a, int n, const SCAL* param)
 		nL1 = 1 << ((L+1)*DIM);
 		sideL = 1 << L;
 		int ntot = (nL1 - 1) / (nZ - 1);
-		//std::clog << "L: " << L << std::endl;
-		//std::clog << "ntot: " << ntot << std::endl;
 		int new_size = (sizeof(VEC) + sizeof(SCAL)*2*tracelessoffset3(order+1)
 					  + sizeof(int)*2)*ntot;
 
@@ -383,7 +381,6 @@ void fmm_cart3_traceless(VEC *p, VEC *a, int n, const SCAL* param)
 			gpuErrchk(cudaMalloc(&d_tmp_stor, stor_bytes));
 		}
 	}
-	//std::clog << "stor_bytes: " << stor_bytes << std::endl;
 	gpuErrchk(cub::DeviceRadixSort::SortPairs(d_tmp_stor, stor_bytes, d_dbuf, d_values, n, 0, L*DIM));
 
 	gather_krnl <<< nBlocks, BLOCK_SIZE >>> (d_tmp, p, d_values.Current(), n);
@@ -412,7 +409,7 @@ void fmm_cart3_traceless(VEC *p, VEC *a, int n, const SCAL* param)
 	if (coll)
 		p2p3 <<< nBlocks, BLOCK_SIZE >>> (a, tree.mult + beg, tree.index + beg, p, m, tree_side(L), radius, EPS2);
 	else
-		rescale <<< nBlocks, BLOCK_SIZE >>> (a, n, param+1);
+		cudaMemset(a, 0, n*sizeof(VEC));
 
 	smemSize = (4*tree.p+1)*BLOCK_SIZE*sizeof(SCAL);
 	for (int l = L; l >= 2; --l)
