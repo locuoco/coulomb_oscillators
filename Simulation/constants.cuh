@@ -18,7 +18,7 @@
 
 // Important defines
 #ifndef SCAL
-#define SCAL double // scalar 
+#define SCAL float // scalar 
 #endif
 
 #ifndef DIM
@@ -41,7 +41,8 @@ int fmm_order = 2; // fast multipole method order
 SCAL tree_radius = 1;
 int tree_L = 0;
 
-__device__ int *d_fmm_order;
+int h_mlt_max;
+__device__ int *d_fmm_order, *d_mlt_max;
 
 bool coll = true, b_unsort = false;
 

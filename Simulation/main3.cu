@@ -714,7 +714,7 @@ int main(const int argc, const char** argv)
 		gpuErrchk(cudaMemcpy(d_par, par, 6*sizeof(SCAL), cudaMemcpyHostToDevice));
 	}
 
-	auto test_time = [cpu, nBodies, buf, par, d_buf, d_par]()
+	auto test_time = [cpu, nBodies, buf, par, d_buf, d_par](bool warming_up = true, int loop_n = 3)
 	{
 		// warming up
 		if (cpu)
@@ -722,7 +722,6 @@ int main(const int argc, const char** argv)
 		else
 			compute_force(fmm_cart3_kdtree, d_buf, nBodies, d_par);
 
-		int loop_n = 1;
 		auto begin = steady_clock::now();
 
 		for (int i = 0; i < loop_n; ++i)
@@ -766,7 +765,7 @@ int main(const int argc, const char** argv)
 
 					if (curr_accuracy < accuracy)
 					{
-						curr_time = test_time();
+						curr_time = test_time(false, 1);
 						if (curr_time < best_time)
 						{
 							best_i = i;
@@ -793,6 +792,7 @@ int main(const int argc, const char** argv)
 			std::cout << ", r = " << best_r;
 			std::cout << ", p = " << best_p;
 			std::cout << ", time = " << best_time << std::endl;
+			std::cout << ", accuracy = " << best_accuracy << std::endl;
 		}
 	}
 
