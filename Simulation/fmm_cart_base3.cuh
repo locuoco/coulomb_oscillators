@@ -411,7 +411,7 @@ inline __host__ __device__ void contract_traceless_ma3(SCAL *__restrict__ C, con
 				for (int kx = 0; kx <= nB-kz; ++kx)
 					t += (SCAL)trinomial(nB, kx, kz) * Ajk[-kx] * Bjk[-kx];
 			}
-			if (b_atomic)
+			if constexpr (b_atomic)
 			{
 #ifdef __CUDA_ARCH__
 				myAtomicAdd(C + (i++), c*t);
@@ -461,7 +461,7 @@ inline __device__ void contract_traceless_ma_coalesced3(SCAL *__restrict__ C, co
 			for (int kx = 0; kx <= nB-kz; ++kx)
 				t += (SCAL)trinomial(nB, kx, kz) * Ajk[-kx] * Bjk[-kx];
 		}
-		if (b_atomic)
+		if constexpr (b_atomic)
 		{
 #ifdef __CUDA_ARCH__
 			myAtomicAdd(C + i, c*t);
@@ -500,7 +500,7 @@ inline __host__ __device__ void contract_traceless2_ma3(SCAL *__restrict__ C, co
 			for (int kz = 0; kz <= nB; ++kz)
 				for (int kx = 0; kx <= nB-kz; ++kx)
 					t += (SCAL)trinomial(nB, kx, kz) * traceless_A_x_z(A, x+kx, z+kz, nA) * traceless_A_x_z(B, kx, kz, nB);
-			if (b_atomic)
+			if constexpr (b_atomic)
 			{
 #ifdef __CUDA_ARCH__
 				myAtomicAdd(C + (i++), c*t);
@@ -525,7 +525,7 @@ inline __host__ __device__ void static_contract_traceless_ma3(SCAL *__restrict__
 // may be built a posteriori through the function traceless_refine
 // O(|nA-nB| * min(nA,nB)^2)
 {
-	if (nA < nB)
+	if constexpr (nA < nB)
 		static_contract_traceless_ma3<nB, nA, b_atomic>(C, B, A, c);
 	else
 	{
@@ -553,7 +553,7 @@ inline __host__ __device__ void static_contract_traceless_ma3(SCAL *__restrict__
 					for (int kx = 0; kx <= nB-kz; ++kx)
 						t += (SCAL)trinomial(nB, kx, kz) * Ajk[-kx] * Bjk[-kx];
 				}
-				if (b_atomic)
+				if constexpr (b_atomic)
 				{
 #ifdef __CUDA_ARCH__
 					myAtomicAdd(C + (i++), c*t);
@@ -576,7 +576,7 @@ inline __host__ __device__ void static_contract_traceless2_ma3(SCAL *C, const SC
 // C contains only the indipendent elements of the result
 // O(|nA-nB| * min(nA,nB)^2)
 {
-	if (nA < nB)
+	if constexpr (nA < nB)
 		static_contract_traceless2_ma3<nB, nA, b_atomic>(C, B, A, c);
 	else
 	{
@@ -593,7 +593,7 @@ inline __host__ __device__ void static_contract_traceless2_ma3(SCAL *C, const SC
 #pragma unroll
 					for (int kx = 0; kx <= nB-kz; ++kx)
 						t += (SCAL)trinomial(nB, kx, kz) * traceless_A_x_z(A, x+kx, z+kz, nA) * traceless_A_x_z(B, kx, kz, nB);
-				if (b_atomic)
+				if constexpr (b_atomic)
 				{
 #ifdef __CUDA_ARCH__
 					myAtomicAdd(C + (i++), c*t);
@@ -771,7 +771,7 @@ inline __host__ __device__ void static_gradient3(SCAL *grad, VEC d, SCAL r, SCAL
 // if this assumption does not hold, accuracy will be reduced
 // O(n^3)
 {
-	if (n == 0)
+	if constexpr (n == 0)
 		grad[0] = c/r;
 	else
 	{
@@ -849,7 +849,7 @@ template <int n>
 inline __host__ __device__ void static_tracelesspow3(SCAL *power, VEC d, SCAL r)
 // O(n^3)
 {
-	if (n == 0)
+	if constexpr (n == 0)
 		power[0] = (SCAL)1;
 	else
 	{
@@ -1150,7 +1150,7 @@ inline __host__ __device__ void static_m2m_acc3(SCAL *__restrict__ Mout, const S
 	}
 }
 
-template <bool b_atomic = false>
+template <bool b_atomic = false, bool no_dipole = false>
 inline __host__ __device__ void m2l_acc3(SCAL *__restrict__ Ltuple, SCAL *__restrict__ temp, const SCAL *__restrict__ Mtuple,
                                          int nM, int nL, VEC d, SCAL r, int minm = 0, int maxm = -1, int maxn = -1)
 // symmetric multipole to traceless local expansion + accumulate
@@ -1170,13 +1170,15 @@ inline __host__ __device__ void m2l_acc3(SCAL *__restrict__ Ltuple, SCAL *__rest
 		for (int n = max(minm, m-nM); n <= min(maxn, m); ++n)
 		{
 			int mn = m-n; // 0 <= mn <= nM
+			if (no_dipole && mn == 1)
+				continue;
 			SCAL C = inv_factorial(n);
 			contract_traceless_ma3<b_atomic>(Ltuple + tracelessoffset3(n), Mtuple + symmetricoffset3(mn), temp, C, mn, m);
 		}
 	}
 }
 
-template <bool b_atomic = false>
+template <bool b_atomic = false, bool no_dipole = false>
 inline __device__ void m2l_acc_coalesced3(SCAL *__restrict__ Ltuple, SCAL *__restrict__ temp, const SCAL *__restrict__ Mtuple,
                                           int nM, int nL, VEC d, SCAL r, int minm = 0, int maxm = -1, int maxn = -1)
 // symmetric multipole to traceless local expansion + accumulate
@@ -1197,13 +1199,15 @@ inline __device__ void m2l_acc_coalesced3(SCAL *__restrict__ Ltuple, SCAL *__res
 		for (int n = max(minm, m-nM); n <= min(maxn, m); ++n)
 		{
 			int mn = m-n; // 0 <= mn <= nM
+			if (no_dipole && mn == 1)
+				continue;
 			SCAL C = inv_factorial(n);
 			contract_traceless_ma_coalesced3<b_atomic>(Ltuple + tracelessoffset3(n), Mtuple + symmetricoffset3(mn), temp, C, mn, m);
 		}
 	}
 }
 
-template <bool b_atomic = false>
+template <bool b_atomic = false, bool no_dipole = false>
 inline __host__ __device__ void m2l_traceless_acc3(SCAL *__restrict__ Ltuple, SCAL *__restrict__ temp, const SCAL *__restrict__ Mtuple,
                                                    int nM, int nL, VEC d, SCAL r, int minm = 0, int maxm = -1, int maxn = -1)
 // traceless multipole to traceless local expansion + accumulate
@@ -1221,99 +1225,57 @@ inline __host__ __device__ void m2l_traceless_acc3(SCAL *__restrict__ Ltuple, SC
 		for (int n = max(minm, m-nM); n <= min(maxn, m); ++n)
 		{
 			int mn = m-n; // 0 <= mn <= nM
+			if (no_dipole && mn == 1)
+				continue;
 			SCAL C = inv_factorial(n);
 			contract_traceless2_ma3<b_atomic>(Ltuple + tracelessoffset3(n), Mtuple + tracelessoffset3(mn), temp, C, mn, m);
 		}
 	}
 }
 
-template <int n, int nmax, int m, bool traceless, bool b_atomic>
-inline __host__ __device__ typename std::enable_if<(n > nmax), void>::type
-	static_m2l_inner2_3(SCAL *, const SCAL *, const SCAL *)
-{
-
-}
-template <int n, int nmax, int m, bool traceless, bool b_atomic>
-inline __host__ __device__ typename std::enable_if<(n <= nmax), void>::type
-	static_m2l_inner2_3(SCAL *__restrict__ Ltuple, const SCAL *__restrict__ grad, const SCAL *__restrict__ Mtuple)
+template <int n, int nmax, int m, bool traceless, bool b_atomic, bool no_dipole>
+inline __host__ __device__ void static_m2l_inner2_3(SCAL *__restrict__ Ltuple, const SCAL *__restrict__ grad, const SCAL *__restrict__ Mtuple)
 // O(n^2 * m * nmax)
 {
 	constexpr int mn = m-n; // 0 <= mn <= nM
-	SCAL C = inv_factorial(n);
-	if (traceless)
-		static_contract_traceless2_ma3<mn, m, b_atomic>(Ltuple + tracelessoffset3(n), Mtuple + tracelessoffset3(mn), grad, C);
-	else
-		static_contract_traceless_ma3<mn, m, b_atomic>(Ltuple + tracelessoffset3(n), Mtuple + symmetricoffset3(mn), grad, C);
-
-	static_m2l_inner2_3<n+1, nmax, m, traceless, b_atomic>(Ltuple, grad, Mtuple);
+	if constexpr (no_dipole && mn != 1)
+	{
+		SCAL C = inv_factorial(n);
+		if constexpr (traceless)
+			static_contract_traceless2_ma3<mn, m, b_atomic>(Ltuple + tracelessoffset3(n), Mtuple + tracelessoffset3(mn), grad, C);
+		else
+			static_contract_traceless_ma3<mn, m, b_atomic>(Ltuple + tracelessoffset3(n), Mtuple + symmetricoffset3(mn), grad, C);
+	}
+	if constexpr (n+1 <= nmax)
+		static_m2l_inner2_3<n+1, nmax, m, traceless, b_atomic, no_dipole>(Ltuple, grad, Mtuple);
 }
 
-template <int m, int N, int minm, int maxm, int maxn, bool b_atomic>
-inline __host__ __device__ typename std::enable_if<(m > maxm), void>::type
-	static_m2l_inner_3(SCAL *, SCAL *, const SCAL *, VEC, SCAL)
-{
-
-}
-template <int m, int N, int minm, int maxm, int maxn, bool b_atomic>
-inline __host__ __device__ typename std::enable_if<(m <= maxm), void>::type
-	static_m2l_inner_3(SCAL *__restrict__ Ltuple, SCAL *__restrict__ grad,
-                       const SCAL *__restrict__ Mtuple, VEC d, SCAL r)
-{
-	static_gradient3<m>(grad, d, r);
-	static_traceless_refine3<m>(grad);
-	static_m2l_inner2_3<static_max(minm, m-N), static_min(maxn, m), m, false, b_atomic>(Ltuple, grad, Mtuple);
-
-	static_m2l_inner_3<m+1, N, minm, maxm, maxn, b_atomic>(Ltuple, grad, Mtuple, d, r);
-}
-
-template <int m, int N, int minm, int maxm, int maxn, bool b_atomic>
-inline __host__ __device__ typename std::enable_if<(m > maxm), void>::type
-	static_m2l_inner_traceless3(SCAL *, SCAL *, const SCAL *, VEC, SCAL)
-{
-
-}
-template <int m, int N, int minm, int maxm, int maxn, bool b_atomic>
-inline __host__ __device__ typename std::enable_if<(m <= maxm), void>::type
-	static_m2l_inner_traceless3(SCAL *__restrict__ Ltuple, SCAL *__restrict__ grad,
-                                const SCAL *__restrict__ Mtuple, VEC d, SCAL r)
+template <int m, int N, int minm, int maxm, int maxn, bool traceless, bool b_atomic, bool no_dipole>
+inline __host__ __device__ void static_m2l_inner_3(SCAL *__restrict__ Ltuple, SCAL *__restrict__ grad,
+                                                   const SCAL *__restrict__ Mtuple, VEC d, SCAL r)
 // O((m^3 + N^3 * m) * N)
 {
 	static_gradient3<m>(grad, d, r);
-	static_m2l_inner2_3<static_max(minm, m-N), static_min(maxn, m), m, true, b_atomic>(Ltuple, grad, Mtuple);
+	if constexpr (!traceless)
+		static_traceless_refine3<m>(grad);
+	static_m2l_inner2_3<static_max(minm, m-N), static_min(maxn, m), m, traceless, b_atomic, no_dipole>(Ltuple, grad, Mtuple);
 
-	static_m2l_inner_traceless3<m+1, N, minm, maxm, maxn, b_atomic>(Ltuple, grad, Mtuple, d, r);
+	if constexpr (m+1 <= maxm)
+		static_m2l_inner_3<m+1, N, minm, maxm, maxn, traceless, b_atomic, no_dipole>(Ltuple, grad, Mtuple, d, r);
 }
 
-template <int n, int N>
-inline __host__ __device__ typename std::enable_if<(n > N), void>::type
-	static_m2l_refine3(SCAL *)
-{
-
-}
-template <int n, int N>
-inline __host__ __device__ typename std::enable_if<(n <= N), void>::type
-	static_m2l_refine3(SCAL *Ltuple)
-// O(n^2 * N)
-{
-	static_traceless_refine3<n>(Ltuple + symmetricoffset3(n));
-
-	static_m2l_refine3<n+1, N>(Ltuple);
-}
-
-template <int N, int minm, int maxm, int maxn, bool traceless, bool b_atomic>
+template <int N, int minm, int maxm, int maxn, bool traceless, bool b_atomic, bool no_dipole>
 inline __host__ __device__ void static_m2l_acc3_(SCAL *__restrict__ Ltuple, SCAL *__restrict__ grad,
                                                  const SCAL *__restrict__ Mtuple, VEC d, SCAL r)
 // O(N^5) - traceless
 {
 	constexpr int maxm_ = (maxm == -1) ? 2*N : ((maxm == -2) ? N : maxm);
 	constexpr int maxn_ = (maxn == -1) ? N : ((maxn == -2) ? N-2 : maxn);
-	if (traceless)
-		static_m2l_inner_traceless3<minm, N, minm, maxm_, maxn_, b_atomic>(Ltuple, grad, Mtuple, d, r);
-	else
-		static_m2l_inner_3<minm, N, minm, maxm_, maxn_, b_atomic>(Ltuple, grad, Mtuple, d, r);
+
+	static_m2l_inner_3<minm, N, minm, maxm_, maxn_, traceless, b_atomic, no_dipole>(Ltuple, grad, Mtuple, d, r);
 }
 
-template <int minm = 0, int maxm = -1, bool traceless = true, bool b_atomic = false, int maxn = -1>
+template <int minm = 0, int maxm = -1, bool traceless = true, bool b_atomic = false, bool no_dipole = false, int maxn = -1>
 inline __host__ __device__ void static_m2l_acc3(SCAL *__restrict__ Ltuple, SCAL *__restrict__ temp,
 											   const SCAL *__restrict__ Mtuple, int N, VEC d, SCAL r)
 // multipole to local expansion + accumulate
@@ -1325,28 +1287,29 @@ inline __host__ __device__ void static_m2l_acc3(SCAL *__restrict__ Ltuple, SCAL 
 	switch (N)
 	{
 		case 0:
-			static_m2l_acc3_<0, minm, maxm, maxn, traceless, b_atomic>(Ltuple, temp, Mtuple, d, r);
+			static_m2l_acc3_<0, minm, maxm, maxn, traceless, b_atomic, no_dipole>(Ltuple, temp, Mtuple, d, r);
 			break;
 		case 1:
-			static_m2l_acc3_<1, minm, maxm, maxn, traceless, b_atomic>(Ltuple, temp, Mtuple, d, r);
+			static_m2l_acc3_<1, minm, maxm, maxn, traceless, b_atomic, no_dipole>(Ltuple, temp, Mtuple, d, r);
 			break;
 		case 2:
-			static_m2l_acc3_<2, minm, maxm, maxn, traceless, b_atomic>(Ltuple, temp, Mtuple, d, r);
+			static_m2l_acc3_<2, minm, maxm, maxn, traceless, b_atomic, no_dipole>(Ltuple, temp, Mtuple, d, r);
 			break;
 		case 3:
-			static_m2l_acc3_<3, minm, maxm, maxn, traceless, b_atomic>(Ltuple, temp, Mtuple, d, r);
+			static_m2l_acc3_<3, minm, maxm, maxn, traceless, b_atomic, no_dipole>(Ltuple, temp, Mtuple, d, r);
 			break;
 		case 4:
-			static_m2l_acc3_<4, minm, maxm, maxn, traceless, b_atomic>(Ltuple, temp, Mtuple, d, r);
+			static_m2l_acc3_<4, minm, maxm, maxn, traceless, b_atomic, no_dipole>(Ltuple, temp, Mtuple, d, r);
 			break;
 		case 5:
-			static_m2l_acc3_<5, minm, maxm, maxn, traceless, b_atomic>(Ltuple, temp, Mtuple, d, r);
+			static_m2l_acc3_<5, minm, maxm, maxn, traceless, b_atomic, no_dipole>(Ltuple, temp, Mtuple, d, r);
 			break;
 		default:
-			if (traceless)
-				m2l_traceless_acc3<b_atomic>(Ltuple, temp, Mtuple, N, N, d, r, minm, (maxm == -2) ? N : maxm, (maxn == -2) ? N-2 : maxn);
+			if constexpr (traceless)
+				m2l_traceless_acc3<b_atomic, no_dipole>
+					(Ltuple, temp, Mtuple, N, N, d, r, minm, (maxm == -2) ? N : maxm, (maxn == -2) ? N-2 : maxn);
 			else
-				m2l_acc3<b_atomic>(Ltuple, temp, Mtuple, N, N, d, r, minm, (maxm == -2) ? N : maxm, (maxn == -2) ? N-2 : maxn);
+				m2l_acc3<b_atomic, no_dipole>(Ltuple, temp, Mtuple, N, N, d, r, minm, (maxm == -2) ? N : maxm, (maxn == -2) ? N-2 : maxn);
 			break;
 	}
 }
@@ -1388,37 +1351,26 @@ inline __host__ __device__ void l2l_traceless_acc3(SCAL *__restrict__ Lout, SCAL
 }
 
 template <int m, int n, int nL>
-inline __host__ __device__ typename std::enable_if<(m > nL), void>::type
-	static_l2l_traceless_inner3(SCAL *, SCAL *, const SCAL *, VEC, SCAL)
-{
-
-}
-template <int m, int n, int nL>
-inline __host__ __device__ typename std::enable_if<(m <= nL), void>::type
-	static_l2l_traceless_inner3(SCAL *__restrict__ Lout, SCAL *__restrict__ temp, const SCAL *__restrict__ Ltuple, VEC d, SCAL r)
+inline __host__ __device__ void static_l2l_traceless_inner3(SCAL *__restrict__ Lout, SCAL *__restrict__ temp,
+                                                            const SCAL *__restrict__ Ltuple, VEC d, SCAL r)
 {
 	constexpr int mn = m-n;
 	static_tracelesspow3<mn>(temp, d, r);
 	SCAL C = binomial(m, mn);
 	static_contract_traceless2_ma3<m, mn>(Lout, Ltuple + tracelessoffset3(m), temp, C);
 
-	static_l2l_traceless_inner3<m+1, n, nL>(Lout, temp, Ltuple, d, r);
+	if constexpr (m+1 <= nL)
+		static_l2l_traceless_inner3<m+1, n, nL>(Lout, temp, Ltuple, d, r);
 }
 
 template <int n, int nL>
-inline __host__ __device__ typename std::enable_if<(n > nL), void>::type
-	static_l2l_traceless_acc_3(SCAL *, SCAL *, const SCAL *, VEC, SCAL)
-{
-
-}
-template <int n, int nL>
-inline __host__ __device__ typename std::enable_if<(n <= nL), void>::type
-	static_l2l_traceless_acc_3(SCAL *__restrict__ Ltupleo, SCAL *__restrict__ temp,
-                               const SCAL *__restrict__ Ltuplei, VEC d, SCAL r)
+inline __host__ __device__ void static_l2l_traceless_acc_3(SCAL *__restrict__ Ltupleo, SCAL *__restrict__ temp,
+                                                           const SCAL *__restrict__ Ltuplei, VEC d, SCAL r)
 {
 	static_l2l_traceless_inner3<n, n, nL>(Ltupleo + tracelessoffset3(n), temp, Ltuplei, d, r);
 
-	static_l2l_traceless_acc_3<n+1, nL>(Ltupleo, temp, Ltuplei, d, r);
+	if constexpr (n+1 <= nL)
+		static_l2l_traceless_acc_3<n+1, nL>(Ltupleo, temp, Ltuplei, d, r);
 }
 
 template <int minn = 0>
@@ -1553,21 +1505,14 @@ inline __host__ __device__ VEC l2p_traceless_field3(SCAL *__restrict__ temp, con
 }
 
 template <int n, int nL>
-inline __host__ __device__ typename std::enable_if<(n > nL), void>::type
-	static_l2p_traceless_field_inner3(SCAL *__restrict__ temp, const SCAL *Ltuple, VEC d, SCAL r)
-{
-
-}
-
-template <int n, int nL>
-inline __host__ __device__ typename std::enable_if<(n <= nL), void>::type
-	static_l2p_traceless_field_inner3(SCAL *__restrict__ temp, const SCAL *Ltuple, VEC d, SCAL r)
+inline __host__ __device__ void static_l2p_traceless_field_inner3(SCAL *__restrict__ temp, const SCAL *Ltuple, VEC d, SCAL r)
 {
 	static_tracelesspow3<n-1>(temp+3, d, r);
 	constexpr SCAL C = (SCAL)n;
 	static_contract_traceless2_ma3<n, n-1>(temp, Ltuple + tracelessoffset3(n), temp+3, C);
 
-	static_l2p_traceless_field_inner3<n+1, nL>(temp, Ltuple, d, r);
+	if constexpr (n+1 <= nL)
+		static_l2p_traceless_field_inner3<n+1, nL>(temp, Ltuple, d, r);
 }
 
 template <int nL>
