@@ -647,7 +647,9 @@ inline __host__ __device__ void static_traceless_refine3(SCAL *A)
 // O(n^2)
 {
 	int i = symmetric_i_x_z(n-2, 2, n);
+#pragma unroll
 	for (int z = 2; z <= n; ++z)
+#pragma unroll
 		for (int x = n-z; x >= 0; --x)
 		{
 			int jsx = symmetric_i_x_z(x+2, z-2, n);
@@ -843,6 +845,18 @@ inline __host__ __device__ void tracelesspow3(SCAL *power, int n, VEC d, SCAL r)
 				power[i++] = C * t1 * binarypow(d.z, z);
 			}
 	}
+}
+
+template <int n>
+inline __host__ __device__ void static_tensorpow3(SCAL *power, VEC d)
+// O(n^2)
+{
+	int i = 0;
+#pragma unroll
+	for (int z = 0; z <= n; ++z)
+#pragma unroll
+		for (int x = n-z; x >= 0; --x)
+			power[i++] = binarypow(d.x, x) * binarypow(d.y, n-x-z) * binarypow(d.z, z);
 }
 
 template <int n>
@@ -1320,7 +1334,7 @@ inline __host__ __device__ void l2l_acc3(SCAL *__restrict__ Lout, SCAL *__restri
 // Ltuple is a tuple of local expansion tensors of orders from 0 to nL (inclusive)
 // returns a local expansion tensor of order n
 // d is the shift from the old position to the new position
-// temp is a temporary memory that needs at least 2*(nL-n)+1 elements (independent for each thread)
+// temp is a temporary memory that needs at least (nL-n+1)*(nL-n+2)/2 elements (independent for each thread)
 {
 	for (int m = n; m <= nL; ++m)
 	{
@@ -1328,7 +1342,6 @@ inline __host__ __device__ void l2l_acc3(SCAL *__restrict__ Lout, SCAL *__restri
 		tensorpow3(temp, mn, d);
 		SCAL C = binomial(m, mn);
 		contract_traceless_ma3(Lout, Ltuple + symmetricoffset3(m), temp, C, m, mn);
-		traceless_refine3(Lout, n);
 	}
 }
 
@@ -1350,62 +1363,73 @@ inline __host__ __device__ void l2l_traceless_acc3(SCAL *__restrict__ Lout, SCAL
 	}
 }
 
-template <int m, int n, int nL>
-inline __host__ __device__ void static_l2l_traceless_inner3(SCAL *__restrict__ Lout, SCAL *__restrict__ temp,
-                                                            const SCAL *__restrict__ Ltuple, VEC d, SCAL r)
+template <int m, int n, int nL, bool traceless>
+inline __host__ __device__ void static_l2l_inner3(SCAL *__restrict__ Lout, SCAL *__restrict__ temp,
+                                                  const SCAL *__restrict__ Ltuple, VEC d, SCAL r)
 {
 	constexpr int mn = m-n;
-	static_tracelesspow3<mn>(temp, d, r);
 	SCAL C = binomial(m, mn);
-	static_contract_traceless2_ma3<m, mn>(Lout, Ltuple + tracelessoffset3(m), temp, C);
+	if constexpr (traceless)
+	{
+		static_tracelesspow3<mn>(temp, d, r);
+		static_contract_traceless2_ma3<m, mn>(Lout, Ltuple + tracelessoffset3(m), temp, C);
+	}
+	else
+	{
+		static_tensorpow3<mn>(temp, d);
+		static_contract_traceless_ma3<m, mn>(Lout, Ltuple + symmetricoffset3(m), temp, C);
+	}
 
 	if constexpr (m+1 <= nL)
-		static_l2l_traceless_inner3<m+1, n, nL>(Lout, temp, Ltuple, d, r);
+		static_l2l_inner3<m+1, n, nL, traceless>(Lout, temp, Ltuple, d, r);
 }
 
-template <int n, int nL>
-inline __host__ __device__ void static_l2l_traceless_acc_3(SCAL *__restrict__ Ltupleo, SCAL *__restrict__ temp,
-                                                           const SCAL *__restrict__ Ltuplei, VEC d, SCAL r)
+template <int n, int nL, bool traceless>
+inline __host__ __device__ void static_l2l_acc_3(SCAL *__restrict__ Ltupleo, SCAL *__restrict__ temp,
+                                                 const SCAL *__restrict__ Ltuplei, VEC d, SCAL r)
 {
-	static_l2l_traceless_inner3<n, n, nL>(Ltupleo + tracelessoffset3(n), temp, Ltuplei, d, r);
+	static_l2l_inner3<n, n, nL, traceless>(Ltupleo + tracelessoffset3(n), temp, Ltuplei, d, r);
 
 	if constexpr (n+1 <= nL)
-		static_l2l_traceless_acc_3<n+1, nL>(Ltupleo, temp, Ltuplei, d, r);
+		static_l2l_acc_3<n+1, nL, traceless>(Ltupleo, temp, Ltuplei, d, r);
 }
 
-template <int minn = 0>
-inline __host__ __device__ void static_l2l_traceless_acc3(SCAL *__restrict__ Ltupleo, SCAL *__restrict__ temp,
-                                                          const SCAL *__restrict__ Ltuplei, int nL, VEC d, SCAL r)
+template <int minn = 0, bool traceless = true>
+inline __host__ __device__ void static_l2l_acc3(SCAL *__restrict__ Ltupleo, SCAL *__restrict__ temp,
+                                                const SCAL *__restrict__ Ltuplei, int nL, VEC d, SCAL r = 0)
 // local to local expansion + accumulate
 // Ltuple is a tuple of local expansion tensors of orders from 0 to nL (inclusive)
 // returns a local expansion tensor of order n
-// d is the unit vector from the old position to the new position
+// d is direction from the old position to the new position (normalized if traceless = true)
 // temp is a temporary memory that needs at least 2*(nL-n)+1 elements (independent for each thread)
 // O(((nL-n)^3 + n * (nL-n)^2)*nL) ~ O(nL^4) for nL times
 {
 	switch (nL)
 	{
 		case 0:
-			static_l2l_traceless_acc_3<minn, 0>(Ltupleo, temp, Ltuplei, d, r);
+			static_l2l_acc_3<minn, 0, traceless>(Ltupleo, temp, Ltuplei, d, r);
 			break;
 		case 1:
-			static_l2l_traceless_acc_3<minn, 1>(Ltupleo, temp, Ltuplei, d, r);
+			static_l2l_acc_3<minn, 1, traceless>(Ltupleo, temp, Ltuplei, d, r);
 			break;
 		case 2:
-			static_l2l_traceless_acc_3<minn, 2>(Ltupleo, temp, Ltuplei, d, r);
+			static_l2l_acc_3<minn, 2, traceless>(Ltupleo, temp, Ltuplei, d, r);
 			break;
 		case 3:
-			static_l2l_traceless_acc_3<minn, 3>(Ltupleo, temp, Ltuplei, d, r);
+			static_l2l_acc_3<minn, 3, traceless>(Ltupleo, temp, Ltuplei, d, r);
 			break;
 		case 4:
-			static_l2l_traceless_acc_3<minn, 4>(Ltupleo, temp, Ltuplei, d, r);
+			static_l2l_acc_3<minn, 4, traceless>(Ltupleo, temp, Ltuplei, d, r);
 			break;
 		case 5:
-			static_l2l_traceless_acc_3<minn, 5>(Ltupleo, temp, Ltuplei, d, r);
+			static_l2l_acc_3<minn, 5, traceless>(Ltupleo, temp, Ltuplei, d, r);
 			break;
 		default:
 			for (int q = minn; q <= nL; ++q)
-				l2l_traceless_acc3(Ltupleo + tracelessoffset3(q), temp, Ltuplei, q, nL, d, r);
+				if constexpr (traceless)
+					l2l_traceless_acc3(Ltupleo + tracelessoffset3(q), temp, Ltuplei, q, nL, d, r);
+				else
+					l2l_acc3(Ltupleo + tracelessoffset3(q), temp, Ltuplei, q, nL, d);
 			break;
 	}
 }
