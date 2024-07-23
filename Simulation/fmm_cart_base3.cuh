@@ -1528,52 +1528,64 @@ inline __host__ __device__ VEC l2p_traceless_field3(SCAL *__restrict__ temp, con
 	return VEC{-temp[0], -temp[1], -temp[2]};
 }
 
-template <int n, int nL>
-inline __host__ __device__ void static_l2p_traceless_field_inner3(SCAL *__restrict__ temp, const SCAL *Ltuple, VEC d, SCAL r)
+template <int n, int nL, bool traceless>
+inline __host__ __device__ void static_l2p_field_inner3(SCAL *__restrict__ temp, const SCAL *Ltuple, VEC d, SCAL r)
 {
-	static_tracelesspow3<n-1>(temp+3, d, r);
 	constexpr SCAL C = (SCAL)n;
-	static_contract_traceless2_ma3<n, n-1>(temp, Ltuple + tracelessoffset3(n), temp+3, C);
+	if constexpr (traceless)
+	{
+		static_tracelesspow3<n-1>(temp+3, d, r);
+		static_contract_traceless2_ma3<n, n-1>(temp, Ltuple + tracelessoffset3(n), temp+3, C);
+	}
+	else
+	{
+		static_tensorpow3<n-1>(temp+3, d);
+		static_contract_traceless_ma3<n, n-1>(temp, Ltuple + symmetricoffset3(n), temp+3, C);
+	}
 
 	if constexpr (n+1 <= nL)
-		static_l2p_traceless_field_inner3<n+1, nL>(temp, Ltuple, d, r);
+		static_l2p_field_inner3<n+1, nL, traceless>(temp, Ltuple, d, r);
 }
 
-template <int nL>
-inline __host__ __device__ VEC static_l2p_traceless_field_3(SCAL *__restrict__ temp, const SCAL *Ltuple, VEC d, SCAL r)
+template <int nL, bool traceless>
+inline __host__ __device__ VEC static_l2p_field_3(SCAL *__restrict__ temp, const SCAL *Ltuple, VEC d, SCAL r)
 {
 	for (int i = 0; i < 3; ++i)
 		temp[i] = (SCAL)0;
 
-	static_l2p_traceless_field_inner3<1, nL>(temp, Ltuple, d, r);
+	static_l2p_field_inner3<1, nL, traceless>(temp, Ltuple, d, r);
 
 	return VEC{-temp[0], -temp[1], -temp[2]};
 }
 
-inline __host__ __device__ VEC static_l2p_traceless_field3(SCAL *__restrict__ temp, const SCAL *Ltuple, int nL, VEC d, SCAL r)
+template <bool traceless = true>
+inline __host__ __device__ VEC static_l2p_field3(SCAL *__restrict__ temp, const SCAL *Ltuple, int nL, VEC d, SCAL r = 0)
 // local to particle expansion (for field)
 // Ltuple is a tuple of local expansion tensors of orders from 0 to nL (inclusive)
 // returns the field evaluated at distance d from the expansion center
-// d is a unit vector
+// d is direction from the old position to the new position (normalized if traceless = true)
 // temp is a temporary memory that needs at least 2*nL+2 elements (independent for each thread)
 // O(nL^4)
 {
 	switch (nL)
 	{
 		case 0:
-			return static_l2p_traceless_field_3<0>(temp, Ltuple, d, r);
+			return static_l2p_field_3<0, traceless>(temp, Ltuple, d, r);
 		case 1:
-			return static_l2p_traceless_field_3<1>(temp, Ltuple, d, r);
+			return static_l2p_field_3<1, traceless>(temp, Ltuple, d, r);
 		case 2:
-			return static_l2p_traceless_field_3<2>(temp, Ltuple, d, r);
+			return static_l2p_field_3<2, traceless>(temp, Ltuple, d, r);
 		case 3:
-			return static_l2p_traceless_field_3<3>(temp, Ltuple, d, r);
+			return static_l2p_field_3<3, traceless>(temp, Ltuple, d, r);
 		case 4:
-			return static_l2p_traceless_field_3<4>(temp, Ltuple, d, r);
+			return static_l2p_field_3<4, traceless>(temp, Ltuple, d, r);
 		case 5:
-			return static_l2p_traceless_field_3<5>(temp, Ltuple, d, r);
+			return static_l2p_field_3<5, traceless>(temp, Ltuple, d, r);
 		default:
-			return l2p_traceless_field3(temp, Ltuple, nL, d, r);
+			if constexpr (traceless)
+				return l2p_traceless_field3(temp, Ltuple, nL, d, r);
+			else
+				return l2p_field3(temp, Ltuple, nL, d);
 	}
 }
 
