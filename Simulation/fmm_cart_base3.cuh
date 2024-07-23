@@ -1018,15 +1018,19 @@ inline __host__ __device__ void m2m3(SCAL *__restrict__ Mout, const SCAL *__rest
 			for (int m = 0; m <= n; ++m)
 			{
 				const SCAL *Mo = Mtuple + symmetricoffset3(n - m);
-				SCAL c(0);
+				SCAL c(0), c2;
 				for (int k1 = 0; k1 <= min(x, m); ++k1)
+				{
+					c2 = 0;
 					for (int k3 = max(0, m-k1-y); k3 <= min(z, m-k1); ++k3)
 					{
 						int k2 = m-k1-k3; // k2 < y => m-k1-k3 < y => k3 > m-k1-y
 						int index = symmetric_i_x_z(x-k1, z-k3, n-m);
-						c += binomial(x, k1) * binomial(y, k2) * binomial(z, k3)
-						   * binarypow(d.x, k1) * binarypow(d.y, k2) * binarypow(d.z, k3) * Mo[index];
+						c2 += binomial(y, k2) * binomial(z, k3)
+						    * binarypow(d.y, k2) * binarypow(d.z, k3) * Mo[index];
 					}
+					c += c2 * binomial(x, k1) * binarypow(d.x, k1);
+				}
 				t += c * static_factorial(n-m);
 			}
 			Mout[i++] = C * t;
@@ -1050,15 +1054,19 @@ inline __host__ __device__ void m2m_acc3(SCAL *__restrict__ Mout, const SCAL *__
 			for (int m = 0; m <= n; ++m)
 			{
 				const SCAL *Mo = Mtuple + symmetricoffset3(n - m);
-				SCAL c(0);
+				SCAL c(0), c2;
 				for (int k1 = 0; k1 <= min(x, m); ++k1)
+				{
+					c2 = 0;
 					for (int k3 = max(0, m-k1-y); k3 <= min(z, m-k1); ++k3)
 					{
 						int k2 = m-k1-k3; // k2 < y => m-k1-k3 < y => k3 > m-k1-y
 						int index = symmetric_i_x_z(x-k1, z-k3, n-m);
-						c += binomial(x, k1) * binomial(y, k2) * binomial(z, k3)
-						   * binarypow(d.x, k1) * binarypow(d.y, k2) * binarypow(d.z, k3) * Mo[index];
+						c2 += binomial(y, k2) * binomial(z, k3)
+						    * binarypow(d.y, k2) * binarypow(d.z, k3) * Mo[index];
 					}
+					c += c2 * binomial(x, k1) * binarypow(d.x, k1);
+				}
 				t += c * static_factorial(n-m);
 			}
 			Mout[i++] += C * t;
@@ -1114,17 +1122,21 @@ inline __host__ __device__ void static_m2m_acc3_(SCAL *__restrict__ Mout, const 
 			for (int m = 0; m <= n; ++m)
 			{
 				const SCAL *Mo = Mtuple + symmetricoffset3(n - m);
-				SCAL c(0);
+				SCAL c(0), c2;
 #pragma unroll
 				for (int k1 = 0; k1 <= min(x, m); ++k1)
+				{
+					c2 = 0;
 #pragma unroll
 					for (int k3 = max(0, m-k1-y); k3 <= min(z, m-k1); ++k3)
 					{
 						int k2 = m-k1-k3; // k2 < y => m-k1-k3 < y => k3 > m-k1-y
 						int index = symmetric_i_x_z(x-k1, z-k3, n-m);
-						c += binomial(x, k1) * binomial(y, k2) * binomial(z, k3)
-						   * binarypow(d.x, k1) * binarypow(d.y, k2) * binarypow(d.z, k3) * Mo[index];
+						c2 += binomial(y, k2) * binomial(z, k3)
+						    * binarypow(d.y, k2) * binarypow(d.z, k3) * Mo[index];
 					}
+					c += c2 * binomial(x, k1) * binarypow(d.x, k1);
+				}
 				t += c * static_factorial(n-m);
 			}
 			Mout[i++] += C * t;

@@ -283,7 +283,58 @@ void fmm_multipoleLeaves3_kdtree_cpu(fmmTree_kd tree, const VEC *p, int L)
 		threads[i].join();
 }
 
-inline __host__ __device__ void fmm_buildTree3_kdtree_krnl(fmmTree_kd tree, int begi, int endi, int stride) // L-1 -> 0
+inline __device__ void fmm_buildTree3_kdtree_krnl(fmmTree_kd tree, int begi, int endi, int stride) // L-1 -> 0
+// build the l-th of cells after the deeper one (l+1)-th
+// "tree" contains only pointers to the actual tree in memory
+{
+	int off = symmetricoffset3(tree.p);
+	extern __shared__ SCAL smems[];
+	SCAL *smin = smems + off*threadIdx.x;
+	SCAL *smout = smems + off*(blockDim.x + threadIdx.x);
+	int inds[2];
+	for (int ijk = begi; ijk < endi; ijk += stride)
+	{
+		inds[0] = kd_lchild(ijk);
+		inds[1] = kd_rchild(ijk);
+
+		int mlt = 0;
+		for (int ii = 0; ii < 2; ++ii)
+			mlt += tree.mult[inds[ii]];
+
+		SCAL mpole0 = (SCAL)mlt;
+
+		VEC coord{};
+		for (int ii = 0; ii < 2; ++ii)
+			coord += (SCAL)tree.mult[inds[ii]] * tree.center[inds[ii]];
+		coord /= mpole0;
+
+		SCAL *multipole = tree.mpole + ijk*off;
+		if (tree.p >= 3)
+		{
+			for (int j = symmetricoffset3(2); j < off; ++j)
+				smout[j] = 0;
+			const SCAL *multipole2;
+			VEC d;
+			for (int ii = 0; ii < 2; ++ii)
+			{
+				d = coord - tree.center[inds[ii]];
+				multipole2 = tree.mpole + inds[ii]*off;
+				for (int j = 0; j < off; ++j)
+					smin[j] = multipole2[j];
+				for (int q = 2; q <= tree.p-1; ++q)
+					static_m2m_acc3(smout + symmetricoffset3(q), smin, q, d);
+			}
+			for (int j = symmetricoffset3(2); j < off; ++j)
+				multipole[j] = smout[j];
+		}
+		multipole[0] = mpole0;
+
+		tree.center[ijk] = coord;
+		tree.mult[ijk] = mlt;
+	}
+}
+
+inline __host__ __device__ void fmm_buildTree3_kdtree2_krnl(fmmTree_kd tree, int begi, int endi, int stride) // L-1 -> 0
 // build the l-th of cells after the deeper one (l+1)-th
 // "tree" contains only pointers to the actual tree in memory
 {
@@ -300,28 +351,27 @@ inline __host__ __device__ void fmm_buildTree3_kdtree_krnl(fmmTree_kd tree, int 
 
 		SCAL mpole0 = (SCAL)mlt;
 
-		if (mlt > 0)
-		{
-			VEC coord{};
-			for (int ii = 0; ii < 2; ++ii)
-				coord += (SCAL)tree.mult[inds[ii]] * tree.center[inds[ii]];
-			coord /= mpole0;
+		VEC coord{};
+		for (int ii = 0; ii < 2; ++ii)
+			coord += (SCAL)tree.mult[inds[ii]] * tree.center[inds[ii]];
+		coord /= mpole0;
 
-			SCAL *multipole = tree.mpole + ijk*off;
+		SCAL *multipole = tree.mpole + ijk*off;
+		if (tree.p >= 3)
+		{
 			const SCAL *multipole2;
 			VEC d;
-			if (tree.p >= 3)
-				for (int ii = 0; ii < 2; ++ii)
-				{
-					d = coord - tree.center[inds[ii]];
-					multipole2 = tree.mpole + inds[ii]*off;
-					for (int q = 2; q <= tree.p-1; ++q)
-						static_m2m_acc3(multipole + symmetricoffset3(q), multipole2, q, d);
-				}
-			multipole[0] = mpole0;
-
-			tree.center[ijk] = coord;
+			for (int ii = 0; ii < 2; ++ii)
+			{
+				d = coord - tree.center[inds[ii]];
+				multipole2 = tree.mpole + inds[ii]*off;
+				for (int q = 2; q <= tree.p-1; ++q)
+					static_m2m_acc3(multipole + symmetricoffset3(q), multipole2, q, d);
+			}
 		}
+		multipole[0] = mpole0;
+
+		tree.center[ijk] = coord;
 		tree.mult[ijk] = mlt;
 	}
 }
@@ -332,6 +382,12 @@ __global__ void fmm_buildTree3_kdtree(fmmTree_kd tree, int l)
 	int end = kd_end(l);
 	fmm_buildTree3_kdtree_krnl(tree, beg + blockDim.x * blockIdx.x + threadIdx.x, end, gridDim.x * blockDim.x);
 }
+__global__ void fmm_buildTree3_kdtree2(fmmTree_kd tree, int l)
+{
+	int beg = kd_beg(l);
+	int end = kd_end(l);
+	fmm_buildTree3_kdtree2_krnl(tree, beg + blockDim.x * blockIdx.x + threadIdx.x, end, gridDim.x * blockDim.x);
+}
 
 void fmm_buildTree3_kdtree_cpu(fmmTree_kd tree, int l)
 {
@@ -340,7 +396,7 @@ void fmm_buildTree3_kdtree_cpu(fmmTree_kd tree, int l)
 	int end = kd_end(l);
 	int niter = (end-beg-1)/CPU_THREADS+1;
 	for (int i = 0; i < CPU_THREADS; ++i)
-		threads[i] = std::thread(fmm_buildTree3_kdtree_krnl, tree, beg + niter*i, std::min(beg + niter*(i+1), end), 1);
+		threads[i] = std::thread(fmm_buildTree3_kdtree2_krnl, tree, beg + niter*i, std::min(beg + niter*(i+1), end), 1);
 	for (int i = 0; i < CPU_THREADS; ++i)
 		threads[i].join();
 }
@@ -1303,9 +1359,9 @@ void sort_particle_cpu(VEC *__restrict__ p, char *__restrict__ c_tmp, int n, T *
 inline __host__ __device__ int buildTree_smem(int blocksize)
 {
 #ifdef __CUDA_ARCH__
-	return (2*(*::d_fmm_order)+1)*blocksize*sizeof(SCAL);
+	return 2*symmetricoffset3(*::d_fmm_order)*blocksize*sizeof(SCAL);
 #else
-	return (2*::fmm_order+1)*blocksize*sizeof(SCAL);
+	return 2*symmetricoffset3(::fmm_order)*blocksize*sizeof(SCAL);
 #endif
 }
 inline __host__ __device__ int p2p0_smem(int blocksize)
@@ -1382,7 +1438,7 @@ void fmm_cart3_kdtree(VEC *p, VEC *a, int n, const SCAL* param)
 	static int p2p_max = 0, m2l_max = 0, stack_max = 0, ntot = 0;
 	static int2 evalKeys_bt, evalIndices_bt, evalBox_bt, evalKeysLeaves_bt,
 		init_bt, indexLeaves_bt, multLeaves_bt, centerLeaves_bt,
-		multipoleLeaves_bt, buildTree_bt, rescale_bt, p2p0_bt,
+		multipoleLeaves_bt, buildTree_bt, buildTree2_bt, rescale_bt, p2p0_bt,
 		p2p1_bt, p2p2_bt, p2p_self_bt, c2c0_bt,
 		c2c1_bt, c2c2_bt, pushl_bt, pushl2_bt,
 		pushLeaves_bt, pushLeaves2_bt, gather_inverse_bt, copy_bt;
@@ -1431,6 +1487,7 @@ void fmm_cart3_kdtree(VEC *p, VEC *a, int n, const SCAL* param)
 				gpuErrchk(cudaOccupancyMaxPotentialBlockSize(&multLeaves_bt.x, &multLeaves_bt.y, multLeaves));
 				gpuErrchk(cudaOccupancyMaxPotentialBlockSize(&centerLeaves_bt.x, &centerLeaves_bt.y, centerLeaves));
 				gpuErrchk(cudaOccupancyMaxPotentialBlockSize(&multipoleLeaves_bt.x, &multipoleLeaves_bt.y, fmm_multipoleLeaves3_kdtree));
+				gpuErrchk(cudaOccupancyMaxPotentialBlockSize(&buildTree2_bt.x, &buildTree2_bt.y, fmm_buildTree3_kdtree2));
 				gpuErrchk(cudaOccupancyMaxPotentialBlockSize(&rescale_bt.x, &rescale_bt.y, rescale));
 				gpuErrchk(cudaOccupancyMaxPotentialBlockSize(&p2p_self_bt.x, &p2p_self_bt.y, fmm_p2p3_self_kdtree));
 				gpuErrchk(cudaOccupancyMaxPotentialBlockSize(&gather_inverse_bt.x, &gather_inverse_bt.y, gather_inverse_krnl<VEC>));
@@ -1539,11 +1596,20 @@ void fmm_cart3_kdtree(VEC *p, VEC *a, int n, const SCAL* param)
 
 	fmm_multipoleLeaves3_kdtree <<< std::min(multipoleLeaves_bt.x, (ntot-1)/multipoleLeaves_bt.y+1), multipoleLeaves_bt.y >>> (tree, p, L);
 
-	smemSize = buildTree_smem(buildTree_bt.y);
-	for (int l = L-1; l >= 0; --l)
+	if (symmetricoffset3(order) >= 64)
+		for (int l = L-1; l >= 0; --l)
+		{
+			int maxBlocks_l = (kd_n(l)-1)/buildTree2_bt.y+1;
+			fmm_buildTree3_kdtree2 <<< std::min(buildTree2_bt.x, maxBlocks_l), buildTree2_bt.y >>> (tree, l);
+		}
+	else
 	{
-		int maxBlocks_l = (kd_n(l)-1)/buildTree_bt.y+1;
-		fmm_buildTree3_kdtree <<< std::min(buildTree_bt.x, maxBlocks_l), buildTree_bt.y, smemSize >>> (tree, l);
+		smemSize = buildTree_smem(buildTree_bt.y);
+		for (int l = L-1; l >= 0; --l)
+		{
+			int maxBlocks_l = (kd_n(l)-1)/buildTree_bt.y+1;
+			fmm_buildTree3_kdtree <<< std::min(buildTree_bt.x, maxBlocks_l), buildTree_bt.y, smemSize >>> (tree, l);
+		}
 	}
 
 	fmm_dualTraversal <<< (L >= 3) ? 18 : 7, 1024 >>>
