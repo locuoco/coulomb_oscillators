@@ -739,8 +739,8 @@ int main(const int argc, const char** argv)
 
 	if (b_accuracy)
 	{
-		std::vector<SCAL> search_i = {.5, 1, 2};
-		std::vector<int> search_p = {1, 2, 3, 4, 5, 6, 8, 10};
+		std::vector<SCAL> search_i = {1, 2, 4};
+		std::vector<int> search_p = {1, 2, 3, 4, 5};
 		std::vector<SCAL> search_r = {1, 2, 3};
 
 		SCAL best_i, best_r, best_time = FLT_MAX, best_accuracy, curr_accuracy, curr_time;

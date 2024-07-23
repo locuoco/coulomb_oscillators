@@ -227,7 +227,7 @@ void elastic_cpu(VEC *__restrict__ p, VEC *__restrict__ a, int n, const SCAL* pa
 
 template<typename T>
 __global__ void gather_krnl(T *__restrict__ dst, const T *__restrict__ src, const int *__restrict__ map, int n)
-// dst array is built from src array through the map pointer
+// dst array is built from src array through a permutation map pointer
 {
     for (int i = blockDim.x * blockIdx.x + threadIdx.x;
 		 i < n;
@@ -253,7 +253,7 @@ void gather_cpu(T *__restrict__ dst, const T *__restrict__ src, const int *__res
 
 template<typename T>
 __global__ void gather_inverse_krnl(T *__restrict__ dst, const T *__restrict__ src, const int *__restrict__ map, int n)
-// dst array is built from src array through the inverse of map pointer
+// dst array is built from src array through the inverse permutation of map pointer
 {
     for (int i = blockDim.x * blockIdx.x + threadIdx.x;
 		 i < n;
