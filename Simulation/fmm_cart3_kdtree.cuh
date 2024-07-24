@@ -148,7 +148,7 @@ void evalBox_cpu(fmmTree_kd tree, const VEC *p, int n, int l)
 		threads[i].join();
 }
 
-inline __host__ __device__ void evalKeys_kdtree_krnl(unsigned long long *keys, const int *splitdim, const VEC *p, int n, int l,
+inline __host__ __device__ void evalKeys_kdtree_krnl(unsigned long long *keys, const int *splitdim, const VEC *p, int n, int l, int precision,
                                                      int begi, int endi, int stride)
 // calculate keys for all particles at level l
 {
@@ -166,21 +166,21 @@ inline __host__ __device__ void evalKeys_kdtree_krnl(unsigned long long *keys, c
 			p_.f = -p_.f;
 		else
 			p_.u = ~p_.u; // sorry for undefined behavior
-		keys[i] = (j << 32) | (unsigned long long)p_.u;
+		keys[i] = (j << precision) | (unsigned long long)(p_.u >> (32 - precision));
 	}
 }
 
-__global__ void evalKeys_kdtree(unsigned long long *keys, const int *splitdim, const VEC *p, int n, int l)
+__global__ void evalKeys_kdtree(unsigned long long *keys, const int *splitdim, const VEC *p, int n, int l, int precision = 32)
 {
-	evalKeys_kdtree_krnl(keys, splitdim, p, n, l, blockDim.x * blockIdx.x + threadIdx.x, n, gridDim.x * blockDim.x);
+	evalKeys_kdtree_krnl(keys, splitdim, p, n, l, precision, blockDim.x * blockIdx.x + threadIdx.x, n, gridDim.x * blockDim.x);
 }
 
-void evalKeys_kdtree_cpu(unsigned long long *keys, const int *splitdim, const VEC *p, int n, int l)
+void evalKeys_kdtree_cpu(unsigned long long *keys, const int *splitdim, const VEC *p, int n, int l, int precision = 32)
 {
 	std::vector<std::thread> threads(CPU_THREADS);
 	int niter = (n-1)/CPU_THREADS+1;
 	for (int i = 0; i < CPU_THREADS; ++i)
-		threads[i] = std::thread(evalKeys_kdtree_krnl, keys, splitdim, p, n, l, niter*i, std::min(niter*(i+1), n), 1);
+		threads[i] = std::thread(evalKeys_kdtree_krnl, keys, splitdim, p, n, l, precision, niter*i, std::min(niter*(i+1), n), 1);
 	for (int i = 0; i < CPU_THREADS; ++i)
 		threads[i].join();
 }
@@ -281,23 +281,29 @@ inline __device__ void fmm_buildTree3_kdtree_krnl(fmmTree_kd tree, int begi, int
 {
 	int off = symmetricoffset3(tree.p);
 	extern __shared__ SCAL smems[];
-	SCAL *smin = smems + off*threadIdx.x;
-	SCAL *smout = smems + off*(blockDim.x + threadIdx.x);
-	int inds[2];
+	SCAL *smin = smems + 2*off*threadIdx.x;
+	SCAL *smout = smin + off;
+	int inds[2], mlts[2];
+	VEC centers[2];
 	for (int ijk = begi; ijk < endi; ijk += stride)
 	{
 		inds[0] = kd_lchild(ijk);
 		inds[1] = kd_rchild(ijk);
 
+		for (int ii = 0; ii < 2; ++ii)
+			mlts[ii] = tree.mult[inds[ii]];
+		for (int ii = 0; ii < 2; ++ii)
+			centers[ii] = tree.center[inds[ii]];
+
 		int mlt = 0;
 		for (int ii = 0; ii < 2; ++ii)
-			mlt += tree.mult[inds[ii]];
+			mlt += mlts[ii];
 
 		SCAL mpole0 = (SCAL)mlt;
 
 		VEC coord{};
 		for (int ii = 0; ii < 2; ++ii)
-			coord += (SCAL)tree.mult[inds[ii]] * tree.center[inds[ii]];
+			coord += (SCAL)mlts[ii] * centers[ii];
 		coord /= mpole0;
 
 		SCAL *multipole = tree.mpole + ijk*off;
@@ -309,7 +315,7 @@ inline __device__ void fmm_buildTree3_kdtree_krnl(fmmTree_kd tree, int begi, int
 			VEC d;
 			for (int ii = 0; ii < 2; ++ii)
 			{
-				d = coord - tree.center[inds[ii]];
+				d = coord - centers[ii];
 				multipole2 = tree.mpole + inds[ii]*off;
 				for (int j = 0; j < off; ++j)
 					smin[j] = multipole2[j];
@@ -1547,21 +1553,22 @@ void fmm_cart3_kdtree(VEC *p, VEC *a, int n, const SCAL* param)
 	cub::DoubleBuffer<unsigned long long> d_dbuf(d_keys, d_keys + n);
 	cub::DoubleBuffer<int> d_values(d_ind, d_ind + n);
 
+	int precision = min(32, L + 12);
 	evalRootBox <<< 1, 1 >>> (tree, d_minmax);
-	evalKeys_kdtree <<< std::min(evalKeys_bt.x, (n-1)/evalKeys_bt.y+1), evalKeys_bt.y >>> (d_dbuf.Current(), tree.splitdim, p, n, 0);
+	evalKeys_kdtree <<< std::min(evalKeys_bt.x, (n-1)/evalKeys_bt.y+1), evalKeys_bt.y >>> (d_dbuf.Current(), tree.splitdim, p, n, 0, precision);
 	evalIndices <<< std::min(evalIndices_bt.x, (n-1)/evalIndices_bt.y+1), evalIndices_bt.y >>> (d_values.Current(), n);
 	evalIndices <<< std::min(evalIndices_bt.x, (n-1)/evalIndices_bt.y+1), evalIndices_bt.y >>> (d_unsort, n);
 
-	sort_particle_gpu(p, d_tmp, n, d_dbuf, d_values, d_tmp_stor, stor_bytes, d_unsort, true, 32);
+	sort_particle_gpu(p, d_tmp, n, d_dbuf, d_values, d_tmp_stor, stor_bytes, d_unsort, true, precision);
 
 	for (int l = 1; l <= L-1; ++l)
 	{
 		evalBox <<< std::min(evalBox_bt.x, (kd_n(l)-1)/evalBox_bt.y+1), evalBox_bt.y >>> (tree, p, n, l);
 		evalKeys_kdtree <<< std::min(evalKeys_bt.x, (kd_n(l)-1)/evalKeys_bt.y+1), evalKeys_bt.y >>>
-			(d_dbuf.Current(), tree.splitdim + kd_beg(l), p, n, l);
+			(d_dbuf.Current(), tree.splitdim + kd_beg(l), p, n, l, precision);
 		evalIndices <<< std::min(evalIndices_bt.x, (n-1)/evalIndices_bt.y+1), evalIndices_bt.y >>> (d_values.Current(), n);
 
-		sort_particle_gpu(p, d_tmp, n, d_dbuf, d_values, d_tmp_stor, stor_bytes, d_unsort, true, 32 + l + 1);
+		sort_particle_gpu(p, d_tmp, n, d_dbuf, d_values, d_tmp_stor, stor_bytes, d_unsort, true, precision + l + 1);
 	}
 
 	evalBox <<< std::min(evalBox_bt.x, (m-1)/evalBox_bt.y+1), evalBox_bt.y >>> (tree, p, n, L);

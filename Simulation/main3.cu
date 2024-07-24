@@ -165,14 +165,14 @@ SCAL test_accuracy(void(*test)(VEC*, VEC*, int, const SCAL*), void(*ref)(VEC*, V
 		copy_gpu(d_tmp, (VEC*)d_buf + 2 * n, n);
 	}
 	compute_force(test, d_buf, n, param);
-	relerrReduce(d_relerr, (VEC*)d_buf + 2 * n, d_tmp, n);
+	relerrReduce2(d_relerr, (VEC*)d_buf + 2 * n, d_tmp, n);
 
 	gpuErrchk(cudaMemcpy(&relerr, d_relerr, sizeof(SCAL), cudaMemcpyDeviceToHost));
 
 	if (n > n_max)
 		n_max = n;
 
-	return relerr / (SCAL)n;
+	return relerr;
 }
 
 SCAL test_accuracy_cpu(void(*test)(VEC*, VEC*, int, const SCAL*), void(*ref)(VEC*, VEC*, int, const SCAL*),

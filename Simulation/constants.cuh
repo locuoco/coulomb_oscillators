@@ -34,7 +34,7 @@
 int BLOCK_SIZE = 128; // number of threads in a GPU block
 int MAX_GRID_SIZE = 10; // number of blocks in a GPU grid
 int CACHE_LINE_SIZE = 64; // CPU cache line size (in bytes)
-SCAL EPS2 = (SCAL)1.e-18; // softening parameter squared
+SCAL EPS2 = (SCAL)1.e-12; // softening parameter squared
 
 int CPU_THREADS = 8; // number of concurrent threads in CPU
 int fmm_order = 2; // fast multipole method order
@@ -102,6 +102,49 @@ inline __device__ double myAtomicMax(double* address, double val)
 {
 	return !signbit(val) ? __longlong_as_double(atomicMax((long long*)address, __double_as_longlong(val)))
 		: __longlong_as_double(atomicMin((unsigned long long*)address, (unsigned long long)__double_as_longlong(val)));
+}
+
+#ifdef __GNUC__
+#define host_clz(x) __builtin_clz(x)
+#elif defined(_MSC_VER)
+#include <windows.h>
+#include <intrin.h>
+inline uint32_t host_clz(uint32_t val)
+{
+	DWORD leading_zero = 0;
+	if (_BitScanReverse(&leading_zero, val))
+		return 31 - leading_zero;
+	else
+		return 32;
+}
+#else
+inline uint32_t host_popcnt(uint32_t x)
+{
+	x -= (x >> 1) & 0x55555555;
+	x = ((x >> 2) & 0x33333333) + (x & 0x33333333);
+	x = ((x >> 4) + x) & 0x0f0f0f0f;
+	x += x >> 8;
+	x += x >> 16;
+	return x & 0x0000003f
+}
+inline uint32_t host_clz(uint32_t x)
+{
+	x |= x >> 1;
+	x |= x >> 2;
+	x |= x >> 4;
+	x |= x >> 8;
+	x |= x >> 16;
+	return 32 - host_popcnt(x);
+}
+#endif // __GNUC__
+
+inline __host__ __device__ uint32_t clz(uint32_t val)
+{
+#ifdef __CUDA_ARCH__
+	return __clz(val);
+#else
+	return host_clz(val);
+#endif
 }
 
 #endif // !CONSTANTS_CUDA_H

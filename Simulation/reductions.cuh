@@ -34,6 +34,21 @@ bool isPow2(unsigned int x)
     return (x&(x-1))==0;
 }
 
+inline __device__ __host__ SCAL rel_diff1(VEC x, VEC ref)
+{
+	VEC d = x - ref;
+	SCAL dist2 = dot(d,d), ref2 = dot(ref,ref);
+	return sqrt(dist2/ref2);
+}
+
+inline __device__ __host__ SCAL rel_diff2(VEC x, VEC ref)
+{
+	VEC d = x - ref;
+	VEC s = x + ref;
+	SCAL dist2 = dot(d,d), div2 = dot(s,s);
+	return 2*sqrt(dist2/div2);
+}
+
 struct MinMaxVec
 {
 	SCAL xmin, ymin, zmin, xmax, ymax, zmax;
@@ -93,7 +108,7 @@ void minmaxReduce2(VEC *minmax, const VEC *src, unsigned int n)
 }
 
 template <int blockSize>
-__global__ void relerrReduce2_krnl(SCAL *__restrict__ relerr, const VEC *__restrict__ x, const VEC *__restrict__ xref, int n)
+__global__ void relerrReduce2_krnl(SCAL *relerr, const VEC *__restrict__ x, const VEC *__restrict__ xref, int n)
 {
 	using BlockReduceT = cub::BlockReduce<SCAL, blockSize>;
 	__shared__ typename BlockReduceT::TempStorage temp_storage;
@@ -103,10 +118,7 @@ __global__ void relerrReduce2_krnl(SCAL *__restrict__ relerr, const VEC *__restr
 
 	SCAL result;
 	if (gid < n)
-	{
-		VEC diff = x[gid]-xref[gid];
-		result = BlockReduceT(temp_storage).Sum(dot(diff, diff) / dot(xref[gid], xref[gid]));
-	}
+		result = BlockReduceT(temp_storage).Sum(rel_diff1(x[gid], xref[gid])/n);
 
 	if (tid == 0)
 		myAtomicAdd(relerr, result);
@@ -117,6 +129,55 @@ void relerrReduce2(SCAL *relerr, const VEC *x, const VEC *xref, unsigned int n)
 	int nBlocks = (n-1)/1024 + 1;
 	cudaMemset(relerr, 0, sizeof(SCAL));
 	relerrReduce2_krnl<1024> <<< nBlocks, 1024 >>> (relerr, x, xref, n);
+}
+
+template <int blockSize>
+__global__ void relerrReduce3Num_krnl(SCAL *relerr, const VEC *__restrict__ x, const VEC *__restrict__ xref, int n)
+{
+	using BlockReduceT = cub::BlockReduce<SCAL, blockSize>;
+	__shared__ typename BlockReduceT::TempStorage temp_storage;
+
+	int tid = threadIdx.x;
+	int gid = gridDim.x * blockIdx.x + tid;
+
+	SCAL result;
+	if (gid < n)
+	{
+		VEC d = x[gid] - xref[gid];
+		result = BlockReduceT(temp_storage).Sum(dot(d, d));
+	}
+
+	if (tid == 0)
+		myAtomicAdd(relerr, result);
+}
+template <int blockSize>
+__global__ void relerrReduce3Den_krnl(SCAL *relerr, const VEC *xref, int n)
+{
+	using BlockReduceT = cub::BlockReduce<SCAL, blockSize>;
+	__shared__ typename BlockReduceT::TempStorage temp_storage;
+
+	int tid = threadIdx.x;
+	int gid = gridDim.x * blockIdx.x + tid;
+
+	SCAL result;
+	if (gid < n)
+		result = BlockReduceT(temp_storage).Sum(dot(xref[gid], xref[gid]));
+
+	if (tid == 0)
+		myAtomicAdd(relerr+1, result);
+}
+__global__ void relerrReduce3Res_krnl(SCAL *relerr)
+{
+	relerr[0] = sqrt(relerr[0] / relerr[1]);
+}
+
+void relerrReduce3(SCAL *relerr, const VEC *x, const VEC *xref, unsigned int n)
+{
+	int nBlocks = (n-1)/1024 + 1;
+	cudaMemset(relerr, 0, 2*sizeof(SCAL));
+	relerrReduce3Num_krnl<1024> <<< nBlocks, 1024 >>> (relerr, x, xref, n);
+	relerrReduce3Den_krnl<1024> <<< nBlocks, 1024 >>> (relerr, xref, n);
+	relerrReduce3Res_krnl <<< 1, 1 >>> (relerr);
 }
 
 template <int blockSize, bool nIsPow2>
@@ -317,21 +378,6 @@ void minmaxReduce(VEC *minmax, const VEC *src, unsigned int n, int nBlocksRed = 
 				break;
 		}
 	}
-}
-
-inline __device__ __host__ SCAL rel_diff1(VEC x, VEC ref)
-{
-	VEC d = x - ref;
-	SCAL dist2 = dot(d,d), ref2 = dot(ref,ref);
-	return sqrt(dist2/ref2);
-}
-
-inline __device__ __host__ SCAL rel_diff2(VEC x, VEC ref)
-{
-	VEC d = x - ref;
-	VEC s = x + ref;
-	SCAL dist2 = dot(d,d), div2 = dot(s,s);
-	return 2*sqrt(dist2/div2);
 }
 
 template <int blockSize, bool nIsPow2>
