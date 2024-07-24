@@ -1319,7 +1319,7 @@ void sort_particle_gpu(VEC *__restrict__ p, VEC *__restrict__ d_tmp, int n, cub:
 
 template <typename T>
 void sort_particle_cpu(VEC *__restrict__ p, char *__restrict__ c_tmp, int n, T *__restrict__ keys,
-	int *__restrict__ ind, int *__restrict__ unsort = nullptr)
+	int *__restrict__ ind, int *__restrict__ unsort)
 {
 	if (n > 99999)
 		parasort(n, ind, [keys](int i, int j) { return keys[i] < keys[j]; }, CPU_THREADS);
@@ -1332,14 +1332,8 @@ void sort_particle_cpu(VEC *__restrict__ p, char *__restrict__ c_tmp, int n, T *
 	gather_cpu((VEC*)c_tmp, p, ind, n);
 	copy_cpu(p, (VEC*)c_tmp, n);
 
-	gather_cpu((VEC*)c_tmp, p+n, ind, n);
-	copy_cpu(p+n, (VEC*)c_tmp, n);
-
-	if (::b_unsort)
-	{
-		gather_cpu((int*)c_tmp, unsort, ind, n);
-		copy_cpu(unsort, (int*)c_tmp, n);
-	}
+	gather_cpu((int*)c_tmp, unsort, ind, n);
+	copy_cpu(unsort, (int*)c_tmp, n);
 }
 
 inline __host__ __device__ int buildTree_smem(int blocksize)
@@ -1412,6 +1406,7 @@ void fmm_cart3_kdtree(VEC *p, VEC *a, int n, const SCAL* param)
 {
 	static SCAL i_prev = 0;
 	static unsigned long long *d_keys = nullptr;
+	static cudaDeviceProp prop;
 	static int order = -1, old_size = 0;
 	static int n_prev = 0, n_max = 0, L = 0, ntot_max = 0;
 	static int *d_ind = nullptr, *d_unsort = nullptr;
@@ -1427,7 +1422,7 @@ void fmm_cart3_kdtree(VEC *p, VEC *a, int n, const SCAL* param)
 		buildTree_bt, buildTree2_bt, rescale_bt, p2p0_bt,
 		p2p1_bt, p2p2_bt, p2p_self_bt, c2c0_bt,
 		c2c1_bt, c2c2_bt, pushl_bt, pushl2_bt,
-		pushLeaves_bt, pushLeaves2_bt, gather_bt, gather_inverse_bt, copy_bt;
+		pushLeaves_bt, pushLeaves2_bt, gather_inverse_bt, copy_bt;
 
 	assert(n > BLOCK_SIZE);
 
@@ -1457,6 +1452,8 @@ void fmm_cart3_kdtree(VEC *p, VEC *a, int n, const SCAL* param)
 			}
 			else
 			{
+				gpuErrchk(cudaGetDeviceProperties(&prop, 0));
+
 				gpuErrchk(cudaMalloc((void**)&d_minmax, sizeof(VEC)*2));
 				gpuErrchk(cudaMalloc((void**)&d_p2p_n, sizeof(int)*2));
 				gpuErrchk(cudaMalloc((void**)&d_fmm_order, sizeof(int)));
@@ -1475,7 +1472,6 @@ void fmm_cart3_kdtree(VEC *p, VEC *a, int n, const SCAL* param)
 				gpuErrchk(cudaOccupancyMaxPotentialBlockSize(&buildTree2_bt.x, &buildTree2_bt.y, fmm_buildTree3_kdtree2));
 				gpuErrchk(cudaOccupancyMaxPotentialBlockSize(&rescale_bt.x, &rescale_bt.y, rescale));
 				gpuErrchk(cudaOccupancyMaxPotentialBlockSize(&p2p_self_bt.x, &p2p_self_bt.y, fmm_p2p3_self_kdtree));
-				gpuErrchk(cudaOccupancyMaxPotentialBlockSize(&gather_bt.x, &gather_bt.y, gather_krnl<VEC>));
 				gpuErrchk(cudaOccupancyMaxPotentialBlockSize(&gather_inverse_bt.x, &gather_inverse_bt.y, gather_inverse_krnl<VEC>));
 				gpuErrchk(cudaOccupancyMaxPotentialBlockSize(&copy_bt.x, &copy_bt.y, copy_krnl<VEC>));
 			}
@@ -1497,6 +1493,7 @@ void fmm_cart3_kdtree(VEC *p, VEC *a, int n, const SCAL* param)
 			{
 				gpuErrchk(cudaFree(d_keys));
 				gpuErrchk(cudaFree(d_ind));
+				gpuErrchk(cudaFree(d_unsort));
 				gpuErrchk(cudaFree(d_tmp));
 			}
 			gpuErrchk(cudaMalloc((void**)&d_keys, sizeof(unsigned long long)*n*2));
@@ -1512,10 +1509,10 @@ void fmm_cart3_kdtree(VEC *p, VEC *a, int n, const SCAL* param)
 				gpuErrchk(cudaFree(d_m2l_list));
 				gpuErrchk(cudaFree(d_stack));
 			}
-			p2p_max = std::min(ntot*400, 1024*1024*128);
-			m2l_max = std::min(ntot*400, 1024*1024*128);
+			p2p_max = std::min(ntot*1000, int(prop.totalGlobalMem/(4*sizeof(int2))));
+			m2l_max = std::min(ntot*1000, int(prop.totalGlobalMem/(4*sizeof(int2))));
 			stack_max = ntot*10;
-			gpuErrchk(cudaMalloc((void**)&d_p2p_list, sizeof(int2)*p2p_max)); // 1GB max
+			gpuErrchk(cudaMalloc((void**)&d_p2p_list, sizeof(int2)*p2p_max));
 			gpuErrchk(cudaMalloc((void**)&d_m2l_list, sizeof(int2)*m2l_max));
 			gpuErrchk(cudaMalloc((void**)&d_stack, sizeof(int2)*stack_max));
 		}
@@ -1570,8 +1567,8 @@ void fmm_cart3_kdtree(VEC *p, VEC *a, int n, const SCAL* param)
 	evalBox <<< std::min(evalBox_bt.x, (m-1)/evalBox_bt.y+1), evalBox_bt.y >>> (tree, p, n, L);
 	evalKeysLeaves_kdtree <<< std::min(evalKeysLeaves_bt.x, (m-1)/evalKeysLeaves_bt.y+1), evalKeysLeaves_bt.y >>> ((int*)d_keys, n, L);
 
-	cudaMemset(tree.mpole, 0, ntot*symmetricoffset3(order)*sizeof(SCAL));
-	cudaMemset(tree.local, 0, ntot*tracelessoffset3(order+1)*sizeof(SCAL));
+	gpuErrchk(cudaMemset(tree.mpole, 0, ntot*symmetricoffset3(order)*sizeof(SCAL)));
+	gpuErrchk(cudaMemset(tree.local, 0, ntot*tracelessoffset3(order+1)*sizeof(SCAL)));
 
 	indexLeaves <<< std::min(indexLeaves_bt.x, (m-1)/indexLeaves_bt.y+1), indexLeaves_bt.y >>> (tree.index + beg, (int*)d_keys, m, n);
 
@@ -1601,7 +1598,7 @@ void fmm_cart3_kdtree(VEC *p, VEC *a, int n, const SCAL* param)
 	fmm_dualTraversal <<< (L >= 3) ? 18 : 7, 1024 >>>
 		(tree, d_p2p_list, d_m2l_list, d_stack, d_p2p_n, d_m2l_n, p2p_max, m2l_max, stack_max, radius, L);
 
-	cudaMemset(a, 0, n*sizeof(VEC));
+	gpuErrchk(cudaMemset(a, 0, n*sizeof(VEC)));
 
 	if (coll)
 	{
@@ -1669,21 +1666,12 @@ void fmm_cart3_kdtree(VEC *p, VEC *a, int n, const SCAL* param)
 	if (param != nullptr)
 		rescale <<< std::min(rescale_bt.x, (n-1)/rescale_bt.y+1), rescale_bt.y >>> (a, n, param);
 
-	if (::b_unsort)
-	{
-		// unsort particle positions and accelerations to their initial places
-		gather_inverse_krnl <<< std::min(gather_inverse_bt.x, (n-1)/gather_inverse_bt.y+1), gather_inverse_bt.y >>> (d_tmp, p, d_unsort, n);
-		copy_krnl <<< std::min(copy_bt.x, (n-1)/copy_bt.y+1), copy_bt.y >>> (p, d_tmp, n);
+	// unsort particle positions and accelerations to their initial places
+	gather_inverse_krnl <<< std::min(gather_inverse_bt.x, (n-1)/gather_inverse_bt.y+1), gather_inverse_bt.y >>> (d_tmp, p, d_unsort, n);
+	copy_krnl <<< std::min(copy_bt.x, (n-1)/copy_bt.y+1), copy_bt.y >>> (p, d_tmp, n);
 
-		gather_inverse_krnl <<< std::min(gather_inverse_bt.x, (n-1)/gather_inverse_bt.y+1), gather_inverse_bt.y >>> (d_tmp, a, d_unsort, n);
-		copy_krnl <<< std::min(copy_bt.x, (n-1)/copy_bt.y+1), copy_bt.y >>> (a, d_tmp, n);
-	}
-	else
-	{
-		// sort velocities
-		gather_krnl <<< std::min(gather_bt.x, (n-1)/gather_bt.y+1), gather_bt.y >>> (d_tmp, p+n, d_unsort, n);
-		copy_krnl <<< std::min(copy_bt.x, (n-1)/copy_bt.y+1), copy_bt.y >>> (p+n, d_tmp, n);
-	}
+	gather_inverse_krnl <<< std::min(gather_inverse_bt.x, (n-1)/gather_inverse_bt.y+1), gather_inverse_bt.y >>> (d_tmp, a, d_unsort, n);
+	copy_krnl <<< std::min(copy_bt.x, (n-1)/copy_bt.y+1), copy_bt.y >>> (a, d_tmp, n);
 
 	gpuErrchk(cudaPeekAtLastError());
 	gpuErrchk(cudaDeviceSynchronize());
@@ -1702,7 +1690,7 @@ void fmm_cart3_kdtree_cpu(VEC *p, VEC *a, int n, const SCAL* param)
 	static unsigned long long *keys = nullptr;
 	static int order = -1, old_size = 0;
 	static int n_prev = 0, n_max = 0, L = 0;
-	static int *ind = nullptr;
+	static int *ind = nullptr, *unsort = nullptr;
 	static char *tbuf = nullptr, *c_tmp = nullptr;
 	static fmmTree_kd tree;
 	static std::vector<int2> p2p_list, m2l_list, stack;
@@ -1745,10 +1733,12 @@ void fmm_cart3_kdtree_cpu(VEC *p, VEC *a, int n, const SCAL* param)
 			{
 				delete[] keys;
 				delete[] ind;
+				delete[] unsort;
 				delete[] c_tmp;
 			}
 			keys = new unsigned long long[n];
 			ind = new int[n];
+			unsort = new int[n];
 			c_tmp = new char[n*sizeof(VEC)];
 		}
 	}
@@ -1780,8 +1770,9 @@ void fmm_cart3_kdtree_cpu(VEC *p, VEC *a, int n, const SCAL* param)
 	evalRootBox_cpu(tree, min_.data());
 	evalKeys_kdtree_cpu(keys, tree.splitdim, p, n, 0);
 	evalIndices_cpu(ind, n);
+	evalIndices_cpu(unsort, n);
 
-	sort_particle_cpu(p, c_tmp, n, keys, ind);
+	sort_particle_cpu(p, c_tmp, n, keys, ind, unsort);
 
 	for (int l = 1; l <= L-1; ++l)
 	{
@@ -1789,7 +1780,7 @@ void fmm_cart3_kdtree_cpu(VEC *p, VEC *a, int n, const SCAL* param)
 		evalKeys_kdtree_cpu(keys, tree.splitdim + kd_beg(l), p, n, l);
 		evalIndices_cpu(ind, n);
 
-		sort_particle_cpu(p, c_tmp, n, keys, ind);
+		sort_particle_cpu(p, c_tmp, n, keys, ind, unsort);
 	}
 
 	evalBox_cpu(tree, p, n, L);
@@ -1831,6 +1822,13 @@ void fmm_cart3_kdtree_cpu(VEC *p, VEC *a, int n, const SCAL* param)
 	fmm_pushLeaves3_kdtree_cpu(a, p, tree, L);
 	if (param != nullptr)
 		rescale_cpu(a, n, param);
+
+	// unsort particle positions and accelerations to their initial places
+	gather_inverse_cpu((VEC*)c_tmp, p, unsort, n);
+	copy_cpu(p, (VEC*)c_tmp, n);
+
+	gather_inverse_cpu((VEC*)c_tmp, a, unsort, n);
+	copy_cpu(a, (VEC*)c_tmp, n);
 
 	if (n > n_max)
 		n_max = n;

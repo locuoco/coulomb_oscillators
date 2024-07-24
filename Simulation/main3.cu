@@ -714,7 +714,7 @@ int main(const int argc, const char** argv)
 		gpuErrchk(cudaMemcpy(d_par, par, 6*sizeof(SCAL), cudaMemcpyHostToDevice));
 	}
 
-	auto test_time = [cpu, nBodies, buf, par, d_buf, d_par](bool warming_up = true, int loop_n = 3)
+	auto test_time = [cpu, nBodies, buf, par, d_buf, d_par](bool warming_up = true, SCAL min_loop = 0, int loop_n = 1)
 	{
 		// warming up
 		if (cpu)
@@ -723,19 +723,26 @@ int main(const int argc, const char** argv)
 			compute_force(fmm_cart3_kdtree, d_buf, nBodies, d_par);
 
 		auto begin = steady_clock::now();
+		decltype(begin) end;
+		SCAL duration;
+		int loop_counter = 0;
 
-		for (int i = 0; i < loop_n; ++i)
-			if (cpu)
-				compute_force(fmm_cart3_kdtree_cpu, buf, nBodies, par);
-			else
-				compute_force(fmm_cart3_kdtree, d_buf, nBodies, d_par);
+		do
+		{
+			for (int i = 0; i < loop_n; ++i)
+				if (cpu)
+					compute_force(fmm_cart3_kdtree_cpu, buf, nBodies, par);
+				else
+					compute_force(fmm_cart3_kdtree, d_buf, nBodies, d_par);
 
-		auto end = steady_clock::now();
+			end = steady_clock::now();
+			loop_counter += loop_n;
+			loop_n *= 2;
+			duration = duration_cast<microseconds>(end - begin).count() * (SCAL)1.e-6;
+		} while (duration < min_loop);
 
-		return duration_cast<microseconds>(end - begin).count() * (SCAL)1.e-6 / loop_n;
+		return duration / loop_counter;
 	};
-
-	::b_unsort = true;
 
 	if (b_accuracy)
 	{
@@ -750,8 +757,8 @@ int main(const int argc, const char** argv)
 
 		std::cout << "Parameter optimization in progress, please wait" << std::flush;
 
-		for (SCAL i : search_i)
-			for (SCAL r : search_r)
+		for (SCAL r : search_r)
+			for (SCAL i : search_i)
 				for (int p : search_p)
 				{
 					::dens_inhom = i;
@@ -765,7 +772,7 @@ int main(const int argc, const char** argv)
 
 					if (curr_accuracy < accuracy)
 					{
-						curr_time = test_time(false, 1);
+						curr_time = test_time(false);
 						if (curr_time < best_time)
 						{
 							best_i = i;
@@ -799,7 +806,7 @@ int main(const int argc, const char** argv)
 	if (test)
 	{
 		std::cout << "Average time: "
-				  << test_time()
+				  << test_time(true, 1)
 				  << " [s]" << std::endl;
 
 		for (fmm_order = 1; fmm_order <= 10; ++fmm_order)
@@ -817,8 +824,6 @@ int main(const int argc, const char** argv)
 	}
 	else
 	{
-		::b_unsort = false;
-
 		// precompute accelerations
 		if (cpu)
 			compute_force(coulombOscillatorFMMKD3_cpu, buf, nBodies, par);

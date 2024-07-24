@@ -44,7 +44,7 @@ int tree_L = 0;
 int h_mlt_max;
 __device__ int *d_fmm_order, *d_mlt_max;
 
-bool coll = true, b_unsort = false;
+bool coll = true;
 
 SCAL dens_inhom = 2;
 
