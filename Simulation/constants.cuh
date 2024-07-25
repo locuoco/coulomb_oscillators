@@ -34,7 +34,7 @@
 int BLOCK_SIZE = 128; // number of threads in a GPU block
 int MAX_GRID_SIZE = 10; // number of blocks in a GPU grid
 int CACHE_LINE_SIZE = 64; // CPU cache line size (in bytes)
-SCAL EPS2 = (SCAL)1.e-12; // softening parameter squared
+SCAL EPS2 = (SCAL)1.e-18; // softening parameter squared
 
 int CPU_THREADS = 8; // number of concurrent threads in CPU
 int fmm_order = 2; // fast multipole method order

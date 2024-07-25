@@ -426,7 +426,7 @@ __global__ void fmm_dualTraversal(fmmTree_kd tree, int2 *p2p_list, int2 *m2l_lis
 
 	__shared__ int top;
 
-	int ntot = kd_ntot(L);
+	int ntot = kd_ntot(L), max_top = 1;
 	int stack_size = stack_max/gdim;
 	int2 *block_stack = stack + stack_size*bid;
 
@@ -601,6 +601,8 @@ __global__ void fmm_dualTraversal(fmmTree_kd tree, int2 *p2p_list, int2 *m2l_lis
 			}
 		}
 		__syncthreads();
+		if (tid == 0 & top > max_top)
+			max_top = top;
 	}
 
 	__threadfence();
@@ -611,13 +613,15 @@ __global__ void fmm_dualTraversal(fmmTree_kd tree, int2 *p2p_list, int2 *m2l_lis
 		if (*p2p_n > p2p_max)
 		{
 			*p2p_n = p2p_max;
-			printf("\nexceeded p2p allocated memory\n");
+			printf("Error: exceeded p2p allocated memory\n");
 		}
 		if (*m2l_n > m2l_max)
 		{
 			*m2l_n = m2l_max;
-			printf("\nexceeded m2l allocated memory\n");
+			printf("Error: exceeded m2l allocated memory\n");
 		}
+		if (max_top > stack_max)
+			printf("Error: insufficient stack size for dual tree traversal, data may be corrupted.\n");
 	}
 }
 
@@ -1517,7 +1521,7 @@ void fmm_cart3_kdtree(VEC *p, VEC *a, int n, const SCAL* param)
 			}
 			p2p_max = std::min(ntot*1000, int(prop.totalGlobalMem/(4*sizeof(int2))));
 			m2l_max = std::min(ntot*1000, int(prop.totalGlobalMem/(4*sizeof(int2))));
-			stack_max = ntot*10;
+			stack_max = std::max(ntot*10, 100000);
 			gpuErrchk(cudaMalloc((void**)&d_p2p_list, sizeof(int2)*p2p_max));
 			gpuErrchk(cudaMalloc((void**)&d_m2l_list, sizeof(int2)*m2l_max));
 			gpuErrchk(cudaMalloc((void**)&d_stack, sizeof(int2)*stack_max));
@@ -1574,8 +1578,7 @@ void fmm_cart3_kdtree(VEC *p, VEC *a, int n, const SCAL* param)
 	evalBox <<< std::min(evalBox_bt.x, (m-1)/evalBox_bt.y+1), evalBox_bt.y >>> (tree, p, n, L);
 	evalKeysLeaves_kdtree <<< std::min(evalKeysLeaves_bt.x, (m-1)/evalKeysLeaves_bt.y+1), evalKeysLeaves_bt.y >>> ((int*)d_keys, n, L);
 
-	gpuErrchk(cudaMemset(tree.mpole, 0, ntot*symmetricoffset3(order)*sizeof(SCAL)));
-	gpuErrchk(cudaMemset(tree.local, 0, ntot*tracelessoffset3(order+1)*sizeof(SCAL)));
+	gpuErrchk(cudaMemset(tree.mpole, 0, ntot*(symmetricoffset3(order)+tracelessoffset3(order+1))*sizeof(SCAL)));
 
 	indexLeaves <<< std::min(indexLeaves_bt.x, (m-1)/indexLeaves_bt.y+1), indexLeaves_bt.y >>> (tree.index + beg, (int*)d_keys, m, n);
 

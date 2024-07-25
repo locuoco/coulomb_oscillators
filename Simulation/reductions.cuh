@@ -37,15 +37,15 @@ bool isPow2(unsigned int x)
 inline __device__ __host__ SCAL rel_diff1(VEC x, VEC ref)
 {
 	VEC d = x - ref;
-	SCAL dist2 = dot(d,d), ref2 = dot(ref,ref);
-	return sqrt(dist2/ref2);
+	SCAL dist2 = dot(d,d), ref2 = dot(ref,ref) + SCAL(1.e-18);
+	return sqrt(max(dist2/ref2, SCAL(0)));
 }
 
 inline __device__ __host__ SCAL rel_diff2(VEC x, VEC ref)
 {
 	VEC d = x - ref;
 	VEC s = x + ref;
-	SCAL dist2 = dot(d,d), div2 = dot(s,s);
+	SCAL dist2 = dot(d,d), div2 = dot(s,s) + SCAL(1.e-18);
 	return 2*sqrt(dist2/div2);
 }
 

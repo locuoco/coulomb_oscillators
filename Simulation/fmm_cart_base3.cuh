@@ -1189,16 +1189,17 @@ inline __host__ __device__ void m2l_acc3(SCAL *__restrict__ Ltuple, SCAL *__rest
 {
 	maxm = (maxm == -1) ? nM+nL : maxm;
 	maxn = (maxn == -1) ? nL : maxn;
+	SCAL scal = binarypow(r, maxm+1) * inv_factorial(maxm); // rescaling to avoid overflowing for single-precision fp
 	for (int m = minm; m <= maxm; ++m)
 	{
-		gradient3(temp, m, d, r);
+		gradient3(temp, m, d, r, scal);
 		traceless_refine3(temp, m);
 		for (int n = max(minm, m-nM); n <= min(maxn, m); ++n)
 		{
 			int mn = m-n; // 0 <= mn <= nM
 			if (no_dipole && mn == 1)
 				continue;
-			SCAL C = inv_factorial(n);
+			SCAL C = inv_factorial(n)/scal;
 			contract_traceless_ma3<b_atomic>(Ltuple + tracelessoffset3(n), Mtuple + symmetricoffset3(mn), temp, C, mn, m);
 		}
 	}
@@ -1260,20 +1261,21 @@ inline __host__ __device__ void m2l_traceless_acc3(SCAL *__restrict__ Ltuple, SC
 }
 
 template <int n, int nmax, int m, bool traceless, bool b_atomic, bool no_dipole>
-inline __host__ __device__ void static_m2l_inner2_3(SCAL *__restrict__ Ltuple, const SCAL *__restrict__ grad, const SCAL *__restrict__ Mtuple)
+inline __host__ __device__ void static_m2l_inner2_3(SCAL *__restrict__ Ltuple, const SCAL *__restrict__ grad,
+                                                    const SCAL *__restrict__ Mtuple, SCAL scal)
 // O(n^2 * m * nmax)
 {
 	constexpr int mn = m-n; // 0 <= mn <= nM
 	if constexpr (no_dipole && mn != 1)
 	{
-		SCAL C = inv_factorial(n);
+		SCAL C = inv_factorial(n)/scal;
 		if constexpr (traceless)
 			static_contract_traceless2_ma3<mn, m, b_atomic>(Ltuple + tracelessoffset3(n), Mtuple + tracelessoffset3(mn), grad, C);
 		else
 			static_contract_traceless_ma3<mn, m, b_atomic>(Ltuple + tracelessoffset3(n), Mtuple + symmetricoffset3(mn), grad, C);
 	}
 	if constexpr (n+1 <= nmax)
-		static_m2l_inner2_3<n+1, nmax, m, traceless, b_atomic, no_dipole>(Ltuple, grad, Mtuple);
+		static_m2l_inner2_3<n+1, nmax, m, traceless, b_atomic, no_dipole>(Ltuple, grad, Mtuple, scal);
 }
 
 template <int m, int N, int minm, int maxm, int maxn, bool traceless, bool b_atomic, bool no_dipole>
@@ -1281,10 +1283,11 @@ inline __host__ __device__ void static_m2l_inner_3(SCAL *__restrict__ Ltuple, SC
                                                    const SCAL *__restrict__ Mtuple, VEC d, SCAL r)
 // O((m^3 + N^3 * m) * N)
 {
-	static_gradient3<m>(grad, d, r);
+	SCAL scal = binarypow(r, m+1); // rescaling to avoid overflowing for single-precision fp
+	static_gradient3<m>(grad, d, r, scal);
 	if constexpr (!traceless)
 		static_traceless_refine3<m>(grad);
-	static_m2l_inner2_3<static_max(minm, m-N), static_min(maxn, m), m, traceless, b_atomic, no_dipole>(Ltuple, grad, Mtuple);
+	static_m2l_inner2_3<static_max(minm, m-N), static_min(maxn, m), m, traceless, b_atomic, no_dipole>(Ltuple, grad, Mtuple, scal);
 
 	if constexpr (m+1 <= maxm)
 		static_m2l_inner_3<m+1, N, minm, maxm, maxn, traceless, b_atomic, no_dipole>(Ltuple, grad, Mtuple, d, r);
