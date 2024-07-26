@@ -411,8 +411,12 @@ inline __host__ __device__ bool kd_admissible(const fmmTree_kd& tree, int n1, in
 	SCAL dist2 = dot(d, d);
 	SCAL sz1 = kd_size(tree.lbound[n1], tree.rbound[n1]);
 	SCAL sz2 = kd_size(tree.lbound[n2], tree.rbound[n2]);
-
-	return par*par*max(sz1, sz2) < dist2;
+#ifdef __CUDA_ARCH__
+	SCAL parM = par * __powf(float(max(tree.mult[n1], tree.mult[n2])) / tree.mult[0], 1.f/(3*tree.p+6));
+#else
+	SCAL parM = par * pow(SCAL(max(tree.mult[n1], tree.mult[n2])) / tree.mult[0], SCAL(1)/(3*tree.p+6));
+#endif
+	return parM*parM*max(sz1, sz2) < dist2;
 }
 
 __global__ void fmm_dualTraversal(fmmTree_kd tree, int2 *p2p_list, int2 *m2l_list, int2 *stack, int *p2p_n, int *m2l_n,
