@@ -19,7 +19,7 @@
 
 #include "appel.cuh"
 #include "fmm_cart_base.cuh"
-#include "parasort.h"
+#include "parasort/parasort.h"
 
 struct fmmTree
 {

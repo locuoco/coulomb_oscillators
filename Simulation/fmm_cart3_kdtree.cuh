@@ -19,7 +19,7 @@
 
 #include "appel.cuh"
 #include "fmm_cart_base3.cuh"
-#include "parasort.h"
+#include "parasort/parasort.h"
 
 struct fmmTree_kd
 {
@@ -148,14 +148,14 @@ void evalBox_cpu(fmmTree_kd tree, const VEC *p, int n, int l)
 		threads[i].join();
 }
 
-inline __host__ __device__ void evalKeys_kdtree_krnl(unsigned long long *keys, const int *splitdim, const VEC *p, int n, int l, int precision,
-                                                     int begi, int endi, int stride)
+inline __host__ __device__ void evalKeys_kdtree_krnl(unsigned long long *keys, const int *splitdim, const VEC *p, unsigned long long n,
+                                                     int l, int precision, int begi, int endi, int stride)
 // calculate keys for all particles at level l
 {
 	unsigned long long m = kd_n(l);
-	for (int i = begi; i < endi; i += stride)
+	for (unsigned long long i = begi; i < endi; i += stride)
 	{
-		unsigned long long j = m * i / n;
+		unsigned long long j = min(m * (i+1) / n, m-1);
 		union
 		{
 			unsigned u;
@@ -190,7 +190,7 @@ inline __host__ __device__ void evalKeysLeaves_kdtree_krnl(int *keys, int n, int
 {
 	long long m = kd_n(L);
 	for (int i = begi; i < endi; i += stride)
-		keys[i] = m * i / n;
+		keys[i] = min(m * (i+1) / n, m-1);
 }
 
 __global__ void evalKeysLeaves_kdtree(int *keys, int n, int L)
@@ -412,10 +412,11 @@ inline __host__ __device__ bool kd_admissible(const fmmTree_kd& tree, int n1, in
 	SCAL sz1 = kd_size(tree.lbound[n1], tree.rbound[n1]);
 	SCAL sz2 = kd_size(tree.lbound[n2], tree.rbound[n2]);
 #ifdef __CUDA_ARCH__
-	SCAL parM = par * __powf(float(max(tree.mult[n1], tree.mult[n2])) / tree.mult[0], 1.f/(3*tree.p+6));
+	SCAL M = __powf(float(max(tree.mult[n1], tree.mult[n2])) / tree.mult[0], 1.f/(3*tree.p+6));
 #else
-	SCAL parM = par * pow(SCAL(max(tree.mult[n1], tree.mult[n2])) / tree.mult[0], SCAL(1)/(3*tree.p+6));
+	SCAL M = pow(SCAL(max(tree.mult[n1], tree.mult[n2])) / tree.mult[0], SCAL(1)/(3*tree.p+6));
 #endif
+	SCAL parM = par * M;
 	return parM*parM*max(sz1, sz2) < dist2;
 }
 
@@ -681,8 +682,9 @@ inline __host__ __device__ void fmm_c2c3_kdtree_krnl(fmmTree_kd tree, const int2
 	int offL = tracelessoffset3(tree.p+1);
 	int offL2 = tracelessoffset3(tree.p-1);
 #ifdef __CUDA_ARCH__
-	SCAL *smp = tempi + (tree.p+1)*(tree.p+2)/2;
-	SCAL *sloc = smp + offM;
+	extern __shared__ SCAL smems[];
+	SCAL *smp = smems + (tree.p+1)*(tree.p+2)/2*blockDim.x + offM*threadIdx.x;
+	SCAL *sloc = smems + ((tree.p+1)*(tree.p+2)/2+offM)*blockDim.x + offL*threadIdx.x;
 #endif
 
 	for (int i = begi; i < endi; i += stride)
@@ -802,8 +804,8 @@ __global__ void fmm_c2c3_kdtree_coalesced(fmmTree_kd tree, const int2 *m2l_list,
 
 __global__ void fmm_c2c3_kdtree(fmmTree_kd tree, const int2 *m2l_list, const int *m2l_n, SCAL d_EPS2)
 {
-	extern __shared__ SCAL temp[]; // size must be at least ((p+1)*(p+2)/2 + offM + offL)*blockDim.x
-	SCAL *tempi = temp + ((tree.p+1)*(tree.p+2)/2 + symmetricoffset3(tree.p) + tracelessoffset3(tree.p+1))*threadIdx.x;
+	extern __shared__ SCAL smems[]; // size must be at least ((p+1)*(p+2)/2 + offM + offL)*blockDim.x
+	SCAL *tempi = smems + (tree.p+1)*(tree.p+2)/2*threadIdx.x;
 	fmm_c2c3_kdtree_krnl(tree, m2l_list, d_EPS2, blockDim.x * blockIdx.x + threadIdx.x, *m2l_n, gridDim.x * blockDim.x, tempi);
 }
 
@@ -1523,8 +1525,8 @@ void fmm_cart3_kdtree(VEC *p, VEC *a, int n, const SCAL* param)
 				gpuErrchk(cudaFree(d_m2l_list));
 				gpuErrchk(cudaFree(d_stack));
 			}
-			p2p_max = std::min(ntot*1000, int(prop.totalGlobalMem/(4*sizeof(int2))));
-			m2l_max = std::min(ntot*1000, int(prop.totalGlobalMem/(4*sizeof(int2))));
+			p2p_max = std::min(ntot*200, int(prop.totalGlobalMem/(4*sizeof(int2))));
+			m2l_max = std::min(ntot*200, int(prop.totalGlobalMem/(4*sizeof(int2))));
 			stack_max = std::max(ntot*10, 100000);
 			gpuErrchk(cudaMalloc((void**)&d_p2p_list, sizeof(int2)*p2p_max));
 			gpuErrchk(cudaMalloc((void**)&d_m2l_list, sizeof(int2)*m2l_max));
@@ -1555,13 +1557,14 @@ void fmm_cart3_kdtree(VEC *p, VEC *a, int n, const SCAL* param)
 
 	minmaxReduce2(d_minmax, p, n);
 
+	int precision = clamp(L+8, 16, 32);
+
 	static void *d_tmp_stor = nullptr;
 	static size_t stor_bytes = 0;
 
 	cub::DoubleBuffer<unsigned long long> d_dbuf(d_keys, d_keys + n);
 	cub::DoubleBuffer<int> d_values(d_ind, d_ind + n);
 
-	int precision = min(32, L + 12);
 	evalRootBox <<< 1, 1 >>> (tree, d_minmax);
 	evalKeys_kdtree <<< std::min(evalKeys_bt.x, (n-1)/evalKeys_bt.y+1), evalKeys_bt.y >>> (d_dbuf.Current(), tree.splitdim, p, n, 0, precision);
 	evalIndices <<< std::min(evalIndices_bt.x, (n-1)/evalIndices_bt.y+1), evalIndices_bt.y >>> (d_values.Current(), n);

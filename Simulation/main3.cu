@@ -117,6 +117,26 @@ void adjustRMS(VEC *data, int n, VEC adj)
 		data[i] *= adj / d;
 }
 
+void initU(VEC *data, int n, VEC a, VEC b, std::mt19937_64 &gen)
+// Uniform distribution over a rectangular cuboid
+// velocities remain uninitialized
+// a_j < x_ij < b_j for each particle i and coordinate j = 1,2,3
+{
+	int nBodies = n/2;
+	std::uniform_real_distribution<SCAL> distx(a.x, b.x);
+	std::uniform_real_distribution<SCAL> disty(a.y, b.y);
+	std::uniform_real_distribution<SCAL> distz(a.z, b.z);
+
+	for (int i = 0; i < nBodies; ++i)
+	{
+		data[i].x = distx(gen);
+		data[i].y = disty(gen);
+		data[i].z = distz(gen);
+	}
+
+	centerDist(data, nBodies);
+}
+
 void initGA(VEC *data, int n, VEC x, VEC u, std::mt19937_64 &gen)
 // Gaussian distribution
 // x is the position std.dev.
@@ -674,6 +694,7 @@ int main(const int argc, const char** argv)
 		std::mt19937_64 gen(5351550349027530206);
 		gen.discard(624*2);
 		initGA((VEC*)buf, 2 * nBodies, x, u, gen);
+		initU((VEC*)buf, 2 * nBodies, {-1, -1, -1}, {1, 1, 1}, gen);
 	}
 
 	if (!test)
@@ -722,10 +743,10 @@ int main(const int argc, const char** argv)
 		else
 			compute_force(fmm_cart3_kdtree, d_buf, nBodies, d_par);
 
-		auto begin = steady_clock::now();
-		decltype(begin) end;
 		SCAL duration;
 		int loop_counter = 0;
+		auto begin = steady_clock::now();
+		decltype(begin) end;
 
 		do
 		{
@@ -746,9 +767,9 @@ int main(const int argc, const char** argv)
 
 	if (b_accuracy)
 	{
-		std::vector<SCAL> search_i = {1, 2, 4};
-		std::vector<int> search_p = {1, 2, 3, 4, 5};
-		std::vector<SCAL> search_r = {1, 2, 3};
+		std::vector<SCAL> search_i = {2};
+		std::vector<int> search_p = {1, 2, 3, 4, 5, 6};
+		std::vector<SCAL> search_r = {1.11, 1.25, 1.43, 1.67, 2, 2.5, 3};
 
 		SCAL best_i, best_r, best_time = FLT_MAX, best_accuracy, curr_accuracy, curr_time;
 		int best_p;
@@ -798,13 +819,14 @@ int main(const int argc, const char** argv)
 			std::cout << "i = " << best_i;
 			std::cout << ", r = " << best_r;
 			std::cout << ", p = " << best_p;
-			std::cout << ", time = " << best_time << std::endl;
+			std::cout << ", time = " << best_time;
 			std::cout << ", accuracy = " << best_accuracy << std::endl;
 		}
 	}
 
 	if (test)
 	{
+		std::cout << fmm_order << ": ";
 		std::cout << "Average time: "
 				  << test_time(true, 1)
 				  << " [s]" << std::endl;

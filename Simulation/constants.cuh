@@ -37,7 +37,7 @@ int CACHE_LINE_SIZE = 64; // CPU cache line size (in bytes)
 SCAL EPS2 = (SCAL)1.e-18; // softening parameter squared
 
 int CPU_THREADS = 8; // number of concurrent threads in CPU
-int fmm_order = 2; // fast multipole method order
+int fmm_order = 3; // fast multipole method order
 SCAL tree_radius = 1;
 int tree_L = 0;
 
