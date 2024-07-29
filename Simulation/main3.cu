@@ -17,15 +17,15 @@
 /*
 
 Compilation:
-nvcc main3.cu -o nbco3 -O3 -arch=sm_75 <std=c++20>
+nvcc main3.cu -o nbco3 -O3 -arch=sm_75 --expt-relaxed-constexpr <std=c++20>
 
 Use '--std c++20' for Windows (Visual Studio 2022) or '-std=c++20' for Linux (GCC 10-12)
 
 nvprof nbco3 -test
 
 For debugging:
-nvcc -lineinfo main3.cu -o nbco3 <std=c++20>
-compute-sanitizer nbco3 -test
+nvcc -lineinfo main3.cu -o nbco3 --expt-relaxed-constexpr <std=c++20>
+compute-sanitizer --print-limit 1 nbco3 -test
 
 */
 

@@ -20,6 +20,7 @@
 #include "appel.cuh"
 #include "fmm_cart_base3.cuh"
 #include "parasort/parasort.h"
+#include "bb_segsort/bb_segsort.cuh"
 
 struct fmmTree_kd
 {
@@ -105,15 +106,15 @@ void evalRootBox_cpu(fmmTree_kd& tree, const VEC *d_minmax)
 	evalRootBox_krnl(tree, d_minmax);
 }
 
-inline __host__ __device__ void evalBox_krnl(fmmTree_kd tree, const VEC *p, int n, int l,
+inline __host__ __device__ void evalBox_krnl(fmmTree_kd tree, const VEC *p, int n, int l, int *offsets,
                                              int begi, int endi, int stride)
 {
 	int m = kd_n(l);
 	int beg = kd_beg(l);
 	for (int i = begi; i < endi; i += stride)
 	{
-		int start = (long long)n * i / m;
-		int end = (long long)n * (i+1) / m;
+		int start = (i == 0) ? 0 : ((long long)n * i - 1) / m + 1;
+		int end = ((long long)n * (i+1) - 1) / m + 1;
 		int j = beg + i;
 		int parent = kd_parent(j);
 		int split = tree.splitdim[parent];
@@ -128,34 +129,49 @@ inline __host__ __device__ void evalBox_krnl(fmmTree_kd tree, const VEC *p, int 
 		tree.lbound[j] = lb;
 		tree.rbound[j] = rb;
 		tree.splitdim[j] = arg;
+		if (offsets)
+		{
+			offsets[i] = start;
+			if (i == m-1)
+				offsets[m] = n;
+		}
 	}
 }
 
-__global__ void evalBox(fmmTree_kd tree, const VEC *p, int n, int l)
+__global__ void evalBox(fmmTree_kd tree, const VEC *p, int n, int l, int *offsets = nullptr)
 {
 	int m = kd_n(l);
-	evalBox_krnl(tree, p, n, l, blockDim.x * blockIdx.x + threadIdx.x, m, gridDim.x * blockDim.x);
+	evalBox_krnl(tree, p, n, l, offsets, blockDim.x * blockIdx.x + threadIdx.x, m, gridDim.x * blockDim.x);
 }
 
-void evalBox_cpu(fmmTree_kd tree, const VEC *p, int n, int l)
+void evalBox_cpu(fmmTree_kd tree, const VEC *p, int n, int l, int *offsets = nullptr)
 {
 	int m = kd_n(l);
 	std::vector<std::thread> threads(CPU_THREADS);
 	int niter = (m-1)/CPU_THREADS+1;
 	for (int i = 0; i < CPU_THREADS; ++i)
-		threads[i] = std::thread(evalBox_krnl, tree, p, n, l, niter*i, std::min(niter*(i+1), m), 1);
+		threads[i] = std::thread(evalBox_krnl, tree, p, n, l, offsets, niter*i, std::min(niter*(i+1), m), 1);
 	for (int i = 0; i < CPU_THREADS; ++i)
 		threads[i].join();
 }
 
-inline __host__ __device__ void evalKeys_kdtree_krnl(unsigned long long *keys, const int *splitdim, const VEC *p, unsigned long long n,
-                                                     int l, int precision, int begi, int endi, int stride)
+inline __device__ void evalKeys_kdtree_krnl(float *keys, const int *splitdim, const VEC *p, int n,
+                                            int l, int begi, int endi, int stride)
 // calculate keys for all particles at level l
 {
-	unsigned long long m = kd_n(l);
-	for (unsigned long long i = begi; i < endi; i += stride)
+	long long m = kd_n(l);
+	for (int i = begi; i < endi; i += stride)
+		keys[i] = (float)get_axis(p[i], splitdim[m * i / n]);
+}
+
+inline void evalKeys_kdtree_cpu_krnl(unsigned long long *keys, const int *splitdim, const VEC *p, long long n,
+                                     int l, int precision, int begi, int endi, int stride)
+// calculate keys for all particles at level l
+{
+	long long m = kd_n(l);
+	for (int i = begi; i < endi; i += stride)
 	{
-		unsigned long long j = min(m * (i+1) / n, m-1);
+		unsigned long long j = m * i / n;
 		union
 		{
 			unsigned u;
@@ -170,9 +186,9 @@ inline __host__ __device__ void evalKeys_kdtree_krnl(unsigned long long *keys, c
 	}
 }
 
-__global__ void evalKeys_kdtree(unsigned long long *keys, const int *splitdim, const VEC *p, int n, int l, int precision = 32)
+__global__ void evalKeys_kdtree(float *keys, const int *splitdim, const VEC *p, int n, int l)
 {
-	evalKeys_kdtree_krnl(keys, splitdim, p, n, l, precision, blockDim.x * blockIdx.x + threadIdx.x, n, gridDim.x * blockDim.x);
+	evalKeys_kdtree_krnl(keys, splitdim, p, n, l, blockDim.x * blockIdx.x + threadIdx.x, n, gridDim.x * blockDim.x);
 }
 
 void evalKeys_kdtree_cpu(unsigned long long *keys, const int *splitdim, const VEC *p, int n, int l, int precision = 32)
@@ -180,7 +196,7 @@ void evalKeys_kdtree_cpu(unsigned long long *keys, const int *splitdim, const VE
 	std::vector<std::thread> threads(CPU_THREADS);
 	int niter = (n-1)/CPU_THREADS+1;
 	for (int i = 0; i < CPU_THREADS; ++i)
-		threads[i] = std::thread(evalKeys_kdtree_krnl, keys, splitdim, p, n, l, precision, niter*i, std::min(niter*(i+1), n), 1);
+		threads[i] = std::thread(evalKeys_kdtree_cpu_krnl, keys, splitdim, p, n, l, precision, niter*i, std::min(niter*(i+1), n), 1);
 	for (int i = 0; i < CPU_THREADS; ++i)
 		threads[i].join();
 }
@@ -190,7 +206,7 @@ inline __host__ __device__ void evalKeysLeaves_kdtree_krnl(int *keys, int n, int
 {
 	long long m = kd_n(L);
 	for (int i = begi; i < endi; i += stride)
-		keys[i] = min(m * (i+1) / n, m-1);
+		keys[i] = m * i / n;
 }
 
 __global__ void evalKeysLeaves_kdtree(int *keys, int n, int L)
@@ -1297,11 +1313,15 @@ void fmm_pushLeaves3_kdtree_cpu(VEC *a, const VEC *p, fmmTree_kd tree, int L)
 }
 
 template <typename T>
-void sort_particle_gpu(VEC *__restrict__ p, VEC *__restrict__ d_tmp, int n, cub::DoubleBuffer<T>& d_dkeys, cub::DoubleBuffer<int>& d_values,
-	void *& d_tmp_stor, size_t& stor_bytes, int *d_unsort, bool eval = true, int end_bit = sizeof(T)*8)
+void sort_particle_gpu(VEC *__restrict__ p, VEC *__restrict__ d_tmp, int n, T *__restrict__ d_keys, int *__restrict__ d_ind,
+	void *& d_tmp_stor, size_t& stor_bytes, int *__restrict__ d_unsort, int *__restrict__ d_offsets = nullptr, int n_segs = 1,
+	bool eval = true)
 {
 	static bool first_time = true;
 	static int2 gather_bt, copy_bt, gatherint_bt, copyint_bt;
+
+	cub::DoubleBuffer<T> d_dkeys(d_keys, d_keys + n);
+	cub::DoubleBuffer<int> d_values(d_ind, d_ind + n);
 
 	if (first_time)
 	{
@@ -1315,21 +1335,35 @@ void sort_particle_gpu(VEC *__restrict__ p, VEC *__restrict__ d_tmp, int n, cub:
 	if (eval)
 	{
 		size_t new_stor_bytes = 0;
-		gpuErrchk(cub::DeviceRadixSort::SortPairs(nullptr, new_stor_bytes, d_dkeys, d_values, n, 0, end_bit));
-		if (new_stor_bytes > stor_bytes)
+		if (n_segs == 1)
 		{
-			if (stor_bytes > 0)
-				gpuErrchk(cudaFree(d_tmp_stor));
-			stor_bytes = new_stor_bytes;
-			gpuErrchk(cudaMalloc(&d_tmp_stor, stor_bytes));
+			gpuErrchk(cub::DeviceRadixSort::SortPairs(nullptr, new_stor_bytes, d_dkeys, d_values, n));
+			if (new_stor_bytes > stor_bytes)
+			{
+				if (stor_bytes > 0)
+					gpuErrchk(cudaFree(d_tmp_stor));
+				stor_bytes = new_stor_bytes;
+				gpuErrchk(cudaMalloc(&d_tmp_stor, stor_bytes));
+			}
 		}
 	}
-	gpuErrchk(cub::DeviceRadixSort::SortPairs(d_tmp_stor, stor_bytes, d_dkeys, d_values, n, 0, end_bit));
+	if (n_segs == 1)
+	{
+		gpuErrchk(cub::DeviceRadixSort::SortPairs(d_tmp_stor, stor_bytes, d_dkeys, d_values, n));
+	}
+	else
+		bb_segsort(d_keys, d_ind, d_keys+n, d_ind+n, n, d_offsets, d_offsets+1, n_segs);
 
-	gather_krnl <<< std::min(gather_bt.x, (n-1)/gather_bt.y+1), gather_bt.y >>> (d_tmp, p, d_values.Current(), n);
+	int *vals;
+	if (n_segs == 1)
+		vals = d_values.Current();
+	else
+		vals = d_ind+n;
+
+	gather_krnl <<< std::min(gather_bt.x, (n-1)/gather_bt.y+1), gather_bt.y >>> (d_tmp, p, vals, n);
 	copy_krnl <<< std::min(copy_bt.x, (n-1)/copy_bt.y+1), copy_bt.y >>> (p, d_tmp, n);
 
-	gather_krnl <<< std::min(gatherint_bt.x, (n-1)/gatherint_bt.y+1), gatherint_bt.y >>> ((int*)d_tmp, d_unsort, d_values.Current(), n);
+	gather_krnl <<< std::min(gatherint_bt.x, (n-1)/gatherint_bt.y+1), gatherint_bt.y >>> ((int*)d_tmp, d_unsort, vals, n);
 	copy_krnl <<< std::min(copyint_bt.x, (n-1)/copyint_bt.y+1), copyint_bt.y >>> (d_unsort, (int*)d_tmp, n);
 }
 
@@ -1421,11 +1455,11 @@ inline __host__ __device__ int pushLeaves2_smem(int blocksize)
 void fmm_cart3_kdtree(VEC *p, VEC *a, int n, const SCAL* param)
 {
 	static SCAL i_prev = 0;
-	static unsigned long long *d_keys = nullptr;
+	static float *d_keys = nullptr;
 	static cudaDeviceProp prop;
 	static int order = -1, old_size = 0;
 	static int n_prev = 0, n_max = 0, L = 0, ntot_max = 0;
-	static int *d_ind = nullptr, *d_unsort = nullptr;
+	static int *d_ind = nullptr, *d_unsort = nullptr, *d_offsets = nullptr;
 	static char *d_tbuf = nullptr;
 	static fmmTree_kd tree;
 	static VEC *d_minmax = nullptr;
@@ -1512,7 +1546,7 @@ void fmm_cart3_kdtree(VEC *p, VEC *a, int n, const SCAL* param)
 				gpuErrchk(cudaFree(d_unsort));
 				gpuErrchk(cudaFree(d_tmp));
 			}
-			gpuErrchk(cudaMalloc((void**)&d_keys, sizeof(unsigned long long)*n*2));
+			gpuErrchk(cudaMalloc((void**)&d_keys, sizeof(float)*n*2));
 			gpuErrchk(cudaMalloc((void**)&d_ind, sizeof(int)*n*2));
 			gpuErrchk(cudaMalloc((void**)&d_unsort, sizeof(int)*n));
 			gpuErrchk(cudaMalloc((void**)&d_tmp, sizeof(VEC)*n));
@@ -1524,6 +1558,7 @@ void fmm_cart3_kdtree(VEC *p, VEC *a, int n, const SCAL* param)
 				gpuErrchk(cudaFree(d_p2p_list));
 				gpuErrchk(cudaFree(d_m2l_list));
 				gpuErrchk(cudaFree(d_stack));
+				gpuErrchk(cudaFree(d_offsets));
 			}
 			p2p_max = std::min(ntot*200, int(prop.totalGlobalMem/(4*sizeof(int2))));
 			m2l_max = std::min(ntot*200, int(prop.totalGlobalMem/(4*sizeof(int2))));
@@ -1531,6 +1566,7 @@ void fmm_cart3_kdtree(VEC *p, VEC *a, int n, const SCAL* param)
 			gpuErrchk(cudaMalloc((void**)&d_p2p_list, sizeof(int2)*p2p_max));
 			gpuErrchk(cudaMalloc((void**)&d_m2l_list, sizeof(int2)*m2l_max));
 			gpuErrchk(cudaMalloc((void**)&d_stack, sizeof(int2)*stack_max));
+			gpuErrchk(cudaMalloc((void**)&d_offsets, sizeof(int)*(kd_n(L)+1)));
 		}
 
 		gpuErrchk(cudaMemcpy(::d_fmm_order, &::fmm_order, sizeof(int), cudaMemcpyHostToDevice));
@@ -1557,29 +1593,23 @@ void fmm_cart3_kdtree(VEC *p, VEC *a, int n, const SCAL* param)
 
 	minmaxReduce2(d_minmax, p, n);
 
-	int precision = clamp(L+8, 16, 32);
-
 	static void *d_tmp_stor = nullptr;
 	static size_t stor_bytes = 0;
 
-	cub::DoubleBuffer<unsigned long long> d_dbuf(d_keys, d_keys + n);
-	cub::DoubleBuffer<int> d_values(d_ind, d_ind + n);
-
 	evalRootBox <<< 1, 1 >>> (tree, d_minmax);
-	evalKeys_kdtree <<< std::min(evalKeys_bt.x, (n-1)/evalKeys_bt.y+1), evalKeys_bt.y >>> (d_dbuf.Current(), tree.splitdim, p, n, 0, precision);
-	evalIndices <<< std::min(evalIndices_bt.x, (n-1)/evalIndices_bt.y+1), evalIndices_bt.y >>> (d_values.Current(), n);
+	evalKeys_kdtree <<< std::min(evalKeys_bt.x, (n-1)/evalKeys_bt.y+1), evalKeys_bt.y >>> (d_keys, tree.splitdim, p, n, 0);
+	evalIndices <<< std::min(evalIndices_bt.x, (n-1)/evalIndices_bt.y+1), evalIndices_bt.y >>> (d_ind, n);
 	evalIndices <<< std::min(evalIndices_bt.x, (n-1)/evalIndices_bt.y+1), evalIndices_bt.y >>> (d_unsort, n);
 
-	sort_particle_gpu(p, d_tmp, n, d_dbuf, d_values, d_tmp_stor, stor_bytes, d_unsort, true, precision);
+	sort_particle_gpu(p, d_tmp, n, d_keys, d_ind, d_tmp_stor, stor_bytes, d_unsort, nullptr, 1, true);
 
 	for (int l = 1; l <= L-1; ++l)
 	{
-		evalBox <<< std::min(evalBox_bt.x, (kd_n(l)-1)/evalBox_bt.y+1), evalBox_bt.y >>> (tree, p, n, l);
-		evalKeys_kdtree <<< std::min(evalKeys_bt.x, (kd_n(l)-1)/evalKeys_bt.y+1), evalKeys_bt.y >>>
-			(d_dbuf.Current(), tree.splitdim + kd_beg(l), p, n, l, precision);
-		evalIndices <<< std::min(evalIndices_bt.x, (n-1)/evalIndices_bt.y+1), evalIndices_bt.y >>> (d_values.Current(), n);
+		evalBox <<< std::min(evalBox_bt.x, (kd_n(l)-1)/evalBox_bt.y+1), evalBox_bt.y >>> (tree, p, n, l, d_offsets);
+		evalKeys_kdtree <<< std::min(evalKeys_bt.x, (kd_n(l)-1)/evalKeys_bt.y+1), evalKeys_bt.y >>> (d_keys, tree.splitdim + kd_beg(l), p, n, l);
+		evalIndices <<< std::min(evalIndices_bt.x, (n-1)/evalIndices_bt.y+1), evalIndices_bt.y >>> (d_ind, n);
 
-		sort_particle_gpu(p, d_tmp, n, d_dbuf, d_values, d_tmp_stor, stor_bytes, d_unsort, true, precision + l + 1);
+		sort_particle_gpu(p, d_tmp, n, d_keys, d_ind, d_tmp_stor, stor_bytes, d_unsort, d_offsets, kd_n(l), true);
 	}
 
 	evalBox <<< std::min(evalBox_bt.x, (m-1)/evalBox_bt.y+1), evalBox_bt.y >>> (tree, p, n, L);
