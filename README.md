@@ -16,7 +16,7 @@ External download links:
 ## Simulation
 
 ### Compilation and debugging
-  `nvcc main3.cu -o nbco3 -O3 -arch=sm_<xy> <std=c++20>`
+  `nvcc main3.cu -o nbco3 -O3 --expt-relaxed-constexpr -arch=sm_<xy> <std=c++20>`
 
 `<xy>` is the compute capability of the GPU (usually given in the form `x.y`), for example `sm_50` corresponds to a compute capability of `5.0`.
 `<std=c++20>` is the required standard, depending on the compiler used for host code. Use `--std c++20` for Windows (Visual Studio 2022) or `-std=c++20` for Linux (GCC 10-12).
@@ -25,7 +25,7 @@ The resulting program will be called `nbco3`.
 
 For device-code debugging, first compile with the `-lineinfo` option:
 
-  `nvcc -lineinfo main3.cu -o nbco3 <std=c++20>`
+  `nvcc -lineinfo main3.cu -o nbco3 --expt-relaxed-constexpr <std=c++20>`
 
 and then, run the CUDA Compute Sanitizer tool:
 
