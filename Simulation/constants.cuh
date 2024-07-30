@@ -46,7 +46,7 @@ __device__ int *d_fmm_order, *d_mlt_max;
 
 bool coll = true;
 
-SCAL dens_inhom = 2;
+SCAL dens_inhom = 1;
 
 template <typename T>
 inline __device__ T myAtomicAdd(T* address, T val)

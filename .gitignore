@@ -25,6 +25,9 @@ old/
 # Windows executables
 *.exe
 
+# Nsight Compute profiler
+*.ncu-rep
+
 # References
 ref/
 tex/

@@ -21,7 +21,9 @@ nvcc main3.cu -o nbco3 -O3 -arch=sm_75 --expt-relaxed-constexpr <std=c++20>
 
 Use '--std c++20' for Windows (Visual Studio 2022) or '-std=c++20' for Linux (GCC 10-12)
 
+For profiling:
 nvprof nbco3 -test
+ncu -f -o profile nbco3 -test
 
 For debugging:
 nvcc -lineinfo main3.cu -o nbco3 --expt-relaxed-constexpr <std=c++20>
@@ -29,12 +31,8 @@ compute-sanitizer --print-limit 1 nbco3 -test
 
 */
 
-#include "kernel.cuh"
 #include "direct.cuh"
 #include "integrator.cuh"
-#include "appel.cuh"
-#include "fmm_cart3_symmetric.cuh"
-#include "fmm_cart3_traceless.cuh"
 #include "fmm_cart3_kdtree.cuh"
 #include "reductions.cuh"
 
@@ -55,30 +53,6 @@ void coulombOscillatorDirect(VEC *p, VEC *a, int n, const SCAL* param)
 void coulombOscillatorDirect_cpu(VEC *p, VEC *a, int n, const SCAL* param)
 {
 	direct3_cpu(p, a, n, param);
-	add_elastic_cpu(p, a, n, param+3); // shift pointer
-}
-
-void coulombOscillatorFMMSym3(VEC *p, VEC *a, int n, const SCAL* param)
-{
-	fmm_cart3(p, a, n, param);
-	add_elastic(p, a, n, param+3); // shift pointer
-}
-
-void coulombOscillatorFMMSym3_cpu(VEC *p, VEC *a, int n, const SCAL* param)
-{
-	fmm_cart3_cpu(p, a, n, param);
-	add_elastic_cpu(p, a, n, param+3); // shift pointer
-}
-
-void coulombOscillatorFMMTr3(VEC *p, VEC *a, int n, const SCAL* param)
-{
-	fmm_cart3_traceless(p, a, n, param);
-	add_elastic(p, a, n, param+3); // shift pointer
-}
-
-void coulombOscillatorFMMTr3_cpu(VEC *p, VEC *a, int n, const SCAL* param)
-{
-	fmm_cart3_traceless_cpu(p, a, n, param);
 	add_elastic_cpu(p, a, n, param+3); // shift pointer
 }
 
@@ -689,7 +663,7 @@ int main(const int argc, const char** argv)
 		c_buf = new char[bytes];
 		buf = (SCAL*)c_buf;
 		
-		std::cout << "emittances: " << x * u << std::endl;
+		//std::cout << "emittances: " << x * u << std::endl;
 
 		std::mt19937_64 gen(5351550349027530206);
 		gen.discard(624*2);
@@ -767,7 +741,7 @@ int main(const int argc, const char** argv)
 
 	if (b_accuracy)
 	{
-		std::vector<SCAL> search_i = {2};
+		std::vector<SCAL> search_i = {1};
 		std::vector<int> search_p = {1, 2, 3, 4, 5, 6};
 		std::vector<SCAL> search_r = {1.11, 1.25, 1.43, 1.67, 2, 2.5, 3};
 
@@ -820,7 +794,7 @@ int main(const int argc, const char** argv)
 			std::cout << ", r = " << best_r;
 			std::cout << ", p = " << best_p;
 			std::cout << ", time = " << best_time;
-			std::cout << ", accuracy = " << best_accuracy << std::endl;
+			std::cout << ", error = " << best_accuracy << std::endl;
 		}
 	}
 
