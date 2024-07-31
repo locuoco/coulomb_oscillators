@@ -30,9 +30,9 @@ void compute_force(void(*f)(VEC*, VEC*, int, const SCAL*), SCAL *d_buf, int n, c
 // symplectic methods
 
 void symplectic_euler(void(*f)(VEC*, VEC*, int, const SCAL*), SCAL *d_buf, int n,
-					  const SCAL* param, SCAL dt,
-					  void(*step_func)(VEC*, const VEC*, SCAL, int) = step,
-					  SCAL scale = (SCAL)1)
+                      const SCAL* param, long double dt,
+                      void(*step_func)(VEC*, const VEC*, SCAL, int) = step,
+                      long double scale = 1)
 // 1st order
 {
 	ParticleSystem d_p = { (VEC*)d_buf, ((VEC*)d_buf) + n, ((VEC*)d_buf) + 2 * n };
@@ -49,12 +49,12 @@ void symplectic_euler(void(*f)(VEC*, VEC*, int, const SCAL*), SCAL *d_buf, int n
 
 void leapfrog(
 	void(*f)(VEC*, VEC*, int, const SCAL*),	// pointer to function for the evaulation of the field f(x)
-	SCAL *d_buf,							// pointer to buffer containing x, v, a
-	int n,									// number of particles
-	const SCAL* param,						// additional parameters
-	SCAL dt,								// timestep
+	SCAL *d_buf,                            // pointer to buffer containing x, v, a
+	int n,                                  // number of particles
+	const SCAL* param,                      // additional parameters
+	long double dt,                         // timestep
 	void(*step_func)(VEC*, const VEC*, SCAL, int) = step, // pointer to function for step (multiply/addition)
-	SCAL scale = (SCAL)1					// quantity that rescales the field f(x)
+	long double scale = 1                   // quantity that rescales the field f(x)
 )
 // 2nd order
 {
@@ -62,7 +62,7 @@ void leapfrog(
 						  ((VEC*)d_buf) + n, // velocities
 						  ((VEC*)d_buf) + 2 * n // accelerations
 	};
-	SCAL ds = dt * scale * (SCAL)0.5;
+	long double ds = dt * scale * 0.5L;
 
 	// v += a * dt / 2
 	step_func(d_p.vel, d_p.acc, ds, n);
@@ -80,8 +80,8 @@ void leapfrog(
 constexpr long double fr_par = 1.3512071919596576340476878089715L; // 1 / (2 - cbrt(2))
 
 void forestruth(void(*f)(VEC*, VEC*, int, const SCAL*), SCAL *d_buf, int n,
-				const SCAL* param, SCAL dt, void(*step_func)(VEC*, const VEC*, SCAL, int) = step,
-				SCAL scale = (SCAL)1)
+				const SCAL* param, long double dt, void(*step_func)(VEC*, const VEC*, SCAL, int) = step,
+				long double scale = 1)
 // Forest-Ruth method
 // 4th order
 {
@@ -89,7 +89,7 @@ void forestruth(void(*f)(VEC*, VEC*, int, const SCAL*), SCAL *d_buf, int n,
 						  ((VEC*)d_buf) + n, // velocities
 						  ((VEC*)d_buf) + 2 * n // accelerations
 	};
-	SCAL ds = dt * scale;
+	long double ds = dt * scale;
 
 	step_func(d_p.pos, d_p.vel, SCAL(dt * fr_par / 2), n);
 
@@ -114,8 +114,8 @@ constexpr long double pefrl_parl = -0.2123418310626054E+00L;
 constexpr long double pefrl_parc = -0.6626458266981849E-01L;
 
 void pefrl(void(*f)(VEC*, VEC*, int, const SCAL*), SCAL *d_buf, int n,
-				const SCAL* param, SCAL dt, void(*step_func)(VEC*, const VEC*, SCAL, int) = step,
-				SCAL scale = (SCAL)1)
+				const SCAL* param, long double dt, void(*step_func)(VEC*, const VEC*, SCAL, int) = step,
+				long double scale = 1)
 // Position-extended Forest-Ruth-like method
 // 4th order, slower but more accurate
 {
@@ -123,7 +123,7 @@ void pefrl(void(*f)(VEC*, VEC*, int, const SCAL*), SCAL *d_buf, int n,
 						  ((VEC*)d_buf) + n, // velocities
 						  ((VEC*)d_buf) + 2 * n // accelerations
 	};
-	SCAL ds = dt * scale;
+	long double ds = dt * scale;
 
 	step_func(d_p.pos, d_p.vel, SCAL(dt * pefrl_parx), n);
 

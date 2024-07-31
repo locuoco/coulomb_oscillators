@@ -146,7 +146,7 @@ SCAL test_accuracy(void(*test)(VEC*, VEC*, int, const SCAL*), void(*ref)(VEC*, V
 	static SCAL *d_relerr = nullptr;
 	static SCAL relerr;
 	static VEC *d_tmp = nullptr;
-	if (n > n_max || b_update)
+	if (n > n_max)
 	{
 		if (n_max > 0)
 		{
@@ -155,12 +155,24 @@ SCAL test_accuracy(void(*test)(VEC*, VEC*, int, const SCAL*), void(*ref)(VEC*, V
 		}
 		gpuErrchk(cudaMalloc((void**)&d_tmp, sizeof(VEC)*n));
 		gpuErrchk(cudaMalloc((void**)&d_relerr, sizeof(SCAL)));
-
-		compute_force(ref, d_buf, n, param);
-		copy_gpu(d_tmp, (VEC*)d_buf + 2 * n, n);
 	}
-	compute_force(test, d_buf, n, param);
-	relerrReduce2(d_relerr, (VEC*)d_buf + 2 * n, d_tmp, n);
+	if (::b_unsort)
+	{
+		if (b_update || n != n_max)
+		{
+			compute_force(ref, d_buf, n, param);
+			copy_gpu(d_tmp, (VEC*)d_buf + 2 * n, n);
+		}
+		compute_force(test, d_buf, n, param);
+		relerrReduce2(d_relerr, (VEC*)d_buf + 2 * n, d_tmp, n);
+	}
+	else
+	{
+		compute_force(test, d_buf, n, param);
+		copy_gpu(d_tmp, (VEC*)d_buf + 2 * n, n);
+		compute_force(ref, d_buf, n, param);
+		relerrReduce2(d_relerr, d_tmp, (VEC*)d_buf + 2 * n, n);
+	}
 
 	gpuErrchk(cudaMemcpy(&relerr, d_relerr, sizeof(SCAL), cudaMemcpyDeviceToHost));
 
@@ -221,7 +233,7 @@ int main(const int argc, const char** argv)
 	int nIters = 30001;  // simulation iterations
 	int nSteps = 200;  // number of steps for every "snapshot" saved to file
 	std::string strout("out"), strin;
-	bool in = false, cpu = false, test = false, b_accuracy = false;
+	bool in = false, cpu = false, test = false, test2 = false, b_accuracy = false;
 	SCAL accuracy = 0.001;
 	
 	auto symp_integ = leapfrog;
@@ -271,12 +283,15 @@ int main(const int argc, const char** argv)
 							 "                    Will be ignored if -accuracy is specified.\n"
 							 "  -eps <v>          Smoothing factor. Must be greater than 0. Default is 1e-9.\n"
 							 "  -i <v>            A factor so that max FMM level is round(log(n*i/p^2)).\n"
-							 "                    Default is 10. Will be ignored if -accuracy is specified.\n"
+							 "                    Default is 1. Will be ignored if -maxlevel is specified.\n"
+							 "  -maxlevel <n>     Set the maximum level for kd-tree construction. By default,\n"
+							 "                    it is calculated depending on the number of particles and\n"
+							 "                    expansion order.\n"
 							 "  -ncoll            P2P pass will not be calculated. Will be ignored\n"
 							 "                    if -accuracy is specified.\n"
 							 "  -accuracy <v>     Set minimum accuracy for the simulation. The program will\n"
 							 "                    search optimized parameters that satisfy this condition.\n"
-							 "                    This ignores -p, -r, -i and -ncoll options.\n"
+							 "                    This ignores -p, -r, and -ncoll options.\n"
 							 "  -cpu              Use CPU with multithreading (default is GPU).\n"
 							 "  -cpu-threads <n>  Number of CPU threads. Must be 1 or greater (default is 8).\n"
 							 "                    Implies -cpu.\n"
@@ -284,6 +299,7 @@ int main(const int argc, const char** argv)
 							 "                    if -cpu is NOT specified.\n"
 							 "  -test             Show relative errors and execution times of a single\n"
 							 "                    iteration instead of doing the simulation.\n"
+							 "  -test2            Another test that will be documented soon.\n"
 							 "  -x <vx> <vy> <vz> Set the std.dev. of positions. Will be ignored if [input]\n"
 							 "                    is specified.\n"
 							 "  -u <vx> <vy> <vz> Set the std.dev. of velocities. Will be ignored if [input]\n"
@@ -392,7 +408,7 @@ int main(const int argc, const char** argv)
 					std::cerr << "Error: missing argument to '-p'\n";
 					return -1;
 				}
-				fmm_order = atoi(argv[i+1]);
+				::fmm_order = atoi(argv[i+1]);
 				if (fmm_order <= 0)
 				{
 					std::cerr << "Error: invalid argument to '-p': " << argv[i+1] << '\n';
@@ -407,7 +423,7 @@ int main(const int argc, const char** argv)
 					std::cerr << "Error: missing argument to '-r'\n";
 					return -1;
 				}
-				tree_radius = atof(argv[i+1]);
+				::tree_radius = atof(argv[i+1]);
 				if (tree_radius <= 0)
 				{
 					std::cerr << "Error: invalid argument to '-r': " << argv[i+1] << '\n';
@@ -422,14 +438,14 @@ int main(const int argc, const char** argv)
 					std::cerr << "Error: missing argument to '-eps'\n";
 					return -1;
 				}
-				EPS2 = atof(argv[i+1]);
-				if (EPS2 <= 0)
+				::EPS2 = atof(argv[i+1]);
+				if (::EPS2 <= 0)
 				{
 					std::cerr << "Error: invalid argument to '-eps': " << argv[i+1] << '\n';
 					return -1;
 				}
-				EPS2 *= EPS2;
-				if (EPS2 == 0) // underflow
+				::EPS2 *= ::EPS2;
+				if (::EPS2 == 0) // underflow
 				{
 					std::cerr << "Error: too small argument to '-eps': " << argv[i+1] << '\n';
 					return -1;
@@ -443,10 +459,26 @@ int main(const int argc, const char** argv)
 					std::cerr << "Error: missing argument to '-i'\n";
 					return -1;
 				}
-				dens_inhom = atof(argv[i+1]);
-				if (dens_inhom <= 0)
+				::dens_inhom = atof(argv[i+1]);
+				if (::dens_inhom <= 0)
 				{
 					std::cerr << "Error: invalid argument to '-i': " << argv[i+1] << " (should be greater than 0)\n";
+					return -1;
+				}
+				++i;
+			}
+			else if (argv[i][1] == 'm' && argv[i][2] == 'a' && argv[i][3] == 'x' && argv[i][4] == 'l' && argv[i][5] == 'e'
+			      && argv[i][6] == 'v' && argv[i][7] == 'e' && argv[i][8] == 'l' && argv[i][9] == '\0')
+			{
+				if (i+1 >= argc)
+				{
+					std::cerr << "Error: missing argument to '-maxlevel'\n";
+					return -1;
+				}
+				::tree_L = atoi(argv[i+1]);
+				if (tree_L <= 0)
+				{
+					std::cerr << "Error: invalid argument to '-maxlevel': " << argv[i+1] << " (should be greater than 0)\n";
 					return -1;
 				}
 				++i;
@@ -509,6 +541,9 @@ int main(const int argc, const char** argv)
 			}
 			else if (argv[i][1] == 't' && argv[i][2] == 'e' && argv[i][3] == 's' && argv[i][4] == 't' && argv[i][5] == '\0')
 				test = true;
+			else if (argv[i][1] == 't' && argv[i][2] == 'e' && argv[i][3] == 's' && argv[i][4] == 't' && argv[i][5] == '2'
+			      && argv[i][6] == '\0')
+				test2 = true;
 			else if (argv[i][1] == 'x' && argv[i][2] == 'i' && argv[i][3] == '\0')
 			{
 				if (i+1 >= argc)
@@ -628,10 +663,11 @@ int main(const int argc, const char** argv)
 		std::mt19937_64 gen(5351550349027530206);
 		gen.discard(624*2);
 		initGA((VEC*)buf, 2 * nBodies, x, u, gen);
-		initU((VEC*)buf, 2 * nBodies, {-1, -1, -1}, {1, 1, 1}, gen);
+		if (test)
+			initU((VEC*)buf, 2 * nBodies, {-1, -1, -1}, {1, 1, 1}, gen);
 	}
 
-	if (!test)
+	if (!test && !test2)
 	{
 		std::ofstream farg(strout + "/args.txt", std::ios::out);
 		if (farg)
@@ -770,6 +806,26 @@ int main(const int argc, const char** argv)
 				relerr = test_accuracy(fmm_cart3_kdtree, direct3, d_buf, nBodies, d_par);
 
 			std::cout << "Relative error: " << relerr << std::endl;
+		}
+	}
+	else if (test2)
+	{
+		::b_unsort = false;
+		for (int i = 0; i < 1; ++i)
+		{
+			SCAL relerr;
+			if (cpu)
+			{
+				relerr = test_accuracy_cpu(fmm_cart3_kdtree_cpu, direct3_cpu, buf, nBodies, par);
+				symplectic_euler(coulombOscillatorFMMKD3_cpu, buf, nBodies, par, dt, step_cpu);
+			}
+			else
+			{
+				relerr = test_accuracy(fmm_cart3_kdtree, direct3, d_buf, nBodies, d_par);
+				symplectic_euler(coulombOscillatorFMMKD3, d_buf, nBodies, d_par, dt);
+			}
+
+			std::cout << "Relative error after " << i << " steps: " << relerr << std::endl;
 		}
 	}
 	else
