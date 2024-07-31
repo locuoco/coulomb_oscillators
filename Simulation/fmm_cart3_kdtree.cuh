@@ -24,7 +24,6 @@
 
 struct fmmTree_kd
 {
-	
 	VEC *__restrict__ center, *__restrict__ lbound, *__restrict__ rbound;
 	SCAL *__restrict__ mpole, *__restrict__ local;
 	int *__restrict__ mult, *__restrict__ index, *__restrict__ splitdim;
@@ -87,13 +86,14 @@ inline __host__ __device__ const SCAL& get_axis(const VEC& v, int axis)
 	return reinterpret_cast<const SCAL*>(&v)[axis];
 }
 
-__host__ __device__ void evalRootBox_krnl(fmmTree_kd& tree, const VEC *d_minmax)
+inline __host__ __device__ void evalRootBox_krnl(fmmTree_kd& tree, const VEC *d_minmax)
 {
 	VEC d = d_minmax[1] - d_minmax[0];
 	int arg = (d.x > d.y) ? ((d.x > d.z) ? 0 : 2) : ((d.y > d.z) ? 1 : 2);
 	tree.lbound[0] = d_minmax[0];
 	tree.rbound[0] = d_minmax[1];
 	tree.splitdim[0] = arg;
+	tree.index[0] = 0;
 }
 
 __global__ void evalRootBox(fmmTree_kd tree, const VEC *d_minmax)
@@ -106,8 +106,9 @@ void evalRootBox_cpu(fmmTree_kd& tree, const VEC *d_minmax)
 	evalRootBox_krnl(tree, d_minmax);
 }
 
-inline __host__ __device__ void evalBox_krnl(fmmTree_kd tree, const VEC *p, int n, int l, int *offsets,
-                                             int begi, int endi, int stride)
+template <bool b_last>
+inline __host__ __device__ void evalBox_krnl(fmmTree_kd tree, const VEC *p, int n, int l,
+                                             int begi, int endi, int stride) // l = 1 -> L
 {
 	int m = kd_n(l);
 	int beg = kd_beg(l);
@@ -129,28 +130,27 @@ inline __host__ __device__ void evalBox_krnl(fmmTree_kd tree, const VEC *p, int 
 		tree.lbound[j] = lb;
 		tree.rbound[j] = rb;
 		tree.splitdim[j] = arg;
-		if (offsets)
-		{
-			offsets[i] = start;
-			if (i == m-1)
-				offsets[m] = n;
-		}
+		tree.index[j] = start;
+		if (!b_last && i == m-1)
+			tree.index[j+1] = n;
 	}
 }
 
-__global__ void evalBox(fmmTree_kd tree, const VEC *p, int n, int l, int *offsets = nullptr)
+template <bool b_last = false>
+__global__ void evalBox(fmmTree_kd tree, const VEC *p, int n, int l)
 {
 	int m = kd_n(l);
-	evalBox_krnl(tree, p, n, l, offsets, blockDim.x * blockIdx.x + threadIdx.x, m, gridDim.x * blockDim.x);
+	evalBox_krnl<b_last>(tree, p, n, l, blockDim.x * blockIdx.x + threadIdx.x, m, gridDim.x * blockDim.x);
 }
 
-void evalBox_cpu(fmmTree_kd tree, const VEC *p, int n, int l, int *offsets = nullptr)
+template <bool b_last = false>
+void evalBox_cpu(fmmTree_kd tree, const VEC *p, int n, int l)
 {
 	int m = kd_n(l);
 	std::vector<std::thread> threads(CPU_THREADS);
 	int niter = (m-1)/CPU_THREADS+1;
 	for (int i = 0; i < CPU_THREADS; ++i)
-		threads[i] = std::thread(evalBox_krnl, tree, p, n, l, offsets, niter*i, std::min(niter*(i+1), m), 1);
+		threads[i] = std::thread(evalBox_krnl<b_last>, tree, p, n, l, niter*i, std::min(niter*(i+1), m), 1);
 	for (int i = 0; i < CPU_THREADS; ++i)
 		threads[i].join();
 }
@@ -197,29 +197,6 @@ void evalKeys_kdtree_cpu(unsigned long long *keys, const int *splitdim, const VE
 	int niter = (n-1)/CPU_THREADS+1;
 	for (int i = 0; i < CPU_THREADS; ++i)
 		threads[i] = std::thread(evalKeys_kdtree_cpu_krnl, keys, splitdim, p, n, l, precision, niter*i, std::min(niter*(i+1), n), 1);
-	for (int i = 0; i < CPU_THREADS; ++i)
-		threads[i].join();
-}
-
-inline __host__ __device__ void evalKeysLeaves_kdtree_krnl(int *keys, int n, int L,
-                                                           int begi, int endi, int stride)
-{
-	long long m = kd_n(L);
-	for (int i = begi; i < endi; i += stride)
-		keys[i] = m * i / n;
-}
-
-__global__ void evalKeysLeaves_kdtree(int *keys, int n, int L)
-{
-	evalKeysLeaves_kdtree_krnl(keys, n, L, blockDim.x * blockIdx.x + threadIdx.x, n, gridDim.x * blockDim.x);
-}
-
-void evalKeysLeaves_kdtree_cpu(int *keys, int n, int L)
-{
-	std::vector<std::thread> threads(CPU_THREADS);
-	int niter = (n-1)/CPU_THREADS+1;
-	for (int i = 0; i < CPU_THREADS; ++i)
-		threads[i] = std::thread(evalKeysLeaves_kdtree_krnl, keys, n, L, niter*i, std::min(niter*(i+1), n), 1);
 	for (int i = 0; i < CPU_THREADS; ++i)
 		threads[i].join();
 }
@@ -436,6 +413,20 @@ inline __host__ __device__ bool kd_admissible(const fmmTree_kd& tree, int n1, in
 	return parM*parM*max(sz1, sz2) < dist2;
 }
 
+__constant__ const int2 init_stack7[] = {
+	{3, 3}, {3, 4}, {4, 4}, {1, 2}, {5, 5}, {5, 6}, {6, 6}
+};
+__constant__ const int2 init_stack15[] = {
+	{7, 7}, {7, 8}, {8, 8}, {3, 4}, {9, 9}, {9, 10}, {10, 10},
+	{1, 2}, {11, 11}, {11, 12}, {12, 12}, {5, 6}, {13, 13}, {13, 14}, {14, 14}
+};
+__constant__ const int2 init_stack18[] = {
+	{7, 7}, {7, 8}, {8, 8}, {3, 4}, {9, 9}, {9, 10}, {10, 10},
+	{3, 5}, {3, 6}, {4, 5}, {4, 6}, {11, 11}, {11, 12}, {12, 12},
+	{5, 6}, {13, 13}, {13, 14}, {14, 14}
+};
+
+template <bool b_m2l_first = true>
 __global__ void fmm_dualTraversal(fmmTree_kd tree, int2 *p2p_list, int2 *m2l_list, int2 *stack, int *p2p_n, int *m2l_n,
                                   int p2p_max, int m2l_max, int stack_max, SCAL r, int L)
 // call with CUDA gridsize = 1, 3, 7, 15 or 18
@@ -461,103 +452,23 @@ __global__ void fmm_dualTraversal(fmmTree_kd tree, int2 *p2p_list, int2 *m2l_lis
 				block_stack[0] = {0, 0};
 				break;
 			case 3:
-				if (bid == 0)
-					block_stack[0] = {1, 1};
-				else if (bid == 1)
-					block_stack[0] = {1, 2};
-				else
-					block_stack[0] = {2, 2};
+				block_stack[0] = (bid == 0) ? int2{1, 1} :
+				                 (bid == 1) ? int2{1, 2} :
+				                              int2{2, 2};
 				break;
 			case 7:
-				if (bid == 0)
-					block_stack[0] = {3, 3};
-				else if (bid == 1)
-					block_stack[0] = {3, 4};
-				else if (bid == 2)
-					block_stack[0] = {4, 4};
-				else if (bid == 3)
-					block_stack[0] = {1, 2};
-				else if (bid == 4)
-					block_stack[0] = {5, 5};
-				else if (bid == 5)
-					block_stack[0] = {5, 6};
-				else
-					block_stack[0] = {6, 6};
+				block_stack[0] = init_stack7[bid];
 				break;
 			case 15:
 				if (L >= 3)
 				{
-					if (bid == 0)
-						block_stack[0] = {7, 7};
-					else if (bid == 1)
-						block_stack[0] = {7, 8};
-					else if (bid == 2)
-						block_stack[0] = {8, 8};
-					else if (bid == 3)
-						block_stack[0] = {3, 4};
-					else if (bid == 4)
-						block_stack[0] = {9, 9};
-					else if (bid == 5)
-						block_stack[0] = {9, 10};
-					else if (bid == 6)
-						block_stack[0] = {10, 10};
-					else if (bid == 7)
-						block_stack[0] = {1, 2};
-					else if (bid == 8)
-						block_stack[0] = {11, 11};
-					else if (bid == 9)
-						block_stack[0] = {11, 12};
-					else if (bid == 10)
-						block_stack[0] = {12, 12};
-					else if (bid == 11)
-						block_stack[0] = {5, 6};
-					else if (bid == 12)
-						block_stack[0] = {13, 13};
-					else if (bid == 13)
-						block_stack[0] = {13, 14};
-					else
-						block_stack[0] = {14, 14};
+					block_stack[0] = init_stack15[bid];
 					break;
 				}
 			case 18:
 				if (L >= 3)
 				{
-					if (bid == 0)
-						block_stack[0] = {7, 7};
-					else if (bid == 1)
-						block_stack[0] = {7, 8};
-					else if (bid == 2)
-						block_stack[0] = {8, 8};
-					else if (bid == 3)
-						block_stack[0] = {3, 4};
-					else if (bid == 4)
-						block_stack[0] = {9, 9};
-					else if (bid == 5)
-						block_stack[0] = {9, 10};
-					else if (bid == 6)
-						block_stack[0] = {10, 10};
-					else if (bid == 7)
-						block_stack[0] = {3, 5};
-					else if (bid == 8)
-						block_stack[0] = {3, 6};
-					else if (bid == 9)
-						block_stack[0] = {4, 5};
-					else if (bid == 10)
-						block_stack[0] = {4, 6};
-					else if (bid == 11)
-						block_stack[0] = {11, 11};
-					else if (bid == 12)
-						block_stack[0] = {11, 12};
-					else if (bid == 13)
-						block_stack[0] = {12, 12};
-					else if (bid == 14)
-						block_stack[0] = {5, 6};
-					else if (bid == 15)
-						block_stack[0] = {13, 13};
-					else if (bid == 16)
-						block_stack[0] = {13, 14};
-					else
-						block_stack[0] = {14, 14};
+					block_stack[0] = init_stack18[bid];
 					break;
 				}
 			default:
@@ -590,7 +501,16 @@ __global__ void fmm_dualTraversal(fmmTree_kd tree, int2 *p2p_list, int2 *m2l_lis
 
 		if (stack_pos >= 0)
 		{
-			if (np.x == np.y & kd_lchild(np.x) < ntot)
+			if (!b_m2l_first && (kd_lchild(np.x) >= ntot & kd_lchild(np.y) >= ntot))
+			{
+				if (np.x != np.y)
+				{
+					int pos = atomicAdd(p2p_n, 1);
+					if (pos < p2p_max)
+						p2p_list[pos] = np;
+				}
+			}
+			else if (np.x == np.y & kd_lchild(np.x) < ntot)
 			{
 				int pos = atomicAdd(&top, 3);
 				block_stack[pos  ] = {kd_lchild(np.x), kd_lchild(np.x)};
@@ -603,7 +523,7 @@ __global__ void fmm_dualTraversal(fmmTree_kd tree, int2 *p2p_list, int2 *m2l_lis
 				if (pos < m2l_max)
 					m2l_list[pos] = np;
 			}
-			else if (kd_lchild(np.x) >= ntot & kd_lchild(np.y) >= ntot)
+			else if (b_m2l_first && (kd_lchild(np.x) >= ntot & kd_lchild(np.y) >= ntot))
 			{
 				if (np.x != np.y)
 				{
@@ -1518,7 +1438,7 @@ void fmm_cart3_kdtree(VEC *p, VEC *a, int n, const SCAL* param)
 	static cudaDeviceProp prop;
 	static int order = -1, old_size = 0;
 	static int n_prev = 0, n_max = 0, L = 0, ntot_max = 0;
-	static int *d_ind = nullptr, *d_unsort = nullptr, *d_offsets = nullptr;
+	static int *d_ind = nullptr, *d_unsort = nullptr;
 	static char *d_tbuf = nullptr;
 	static fmmTree_kd tree;
 	static VEC *d_minmax = nullptr;
@@ -1526,11 +1446,10 @@ void fmm_cart3_kdtree(VEC *p, VEC *a, int n, const SCAL* param)
 	static int2 *d_p2p_list = nullptr, *d_m2l_list = nullptr, *d_stack = nullptr;
 	static int *d_p2p_n = nullptr, *d_m2l_n = nullptr;
 	static int p2p_max = 0, m2l_max = 0, stack_max = 0, ntot = 0;
-	static int2 evalKeys_bt, evalIndices_bt, evalBox_bt, evalKeysLeaves_bt,
-		indexLeaves_bt, multLeaves_bt, centerLeaves_bt, multipoleLeaves_bt,
-		buildTree_bt, buildTree2_bt, rescale_bt, p2p0_bt,
-		p2p1_bt, p2p2_bt, p2p_self_bt, p2p_self2_bt, c2c0_bt,
-		c2c1_bt, c2c2_bt, pushl_bt, pushl2_bt,
+	static int2 evalKeys_bt, evalIndices_bt, evalBox_bt, multLeaves_bt,
+		centerLeaves_bt, multipoleLeaves_bt, buildTree_bt, buildTree2_bt,
+		rescale_bt, p2p0_bt, p2p1_bt, p2p2_bt, p2p_self_bt, p2p_self2_bt,
+		c2c0_bt, c2c1_bt, c2c2_bt, pushl_bt, pushl2_bt,
 		pushLeaves_bt, pushLeaves2_bt, gather_inverse_bt, copy_bt;
 
 	assert(n > BLOCK_SIZE);
@@ -1574,9 +1493,7 @@ void fmm_cart3_kdtree(VEC *p, VEC *a, int n, const SCAL* param)
 
 				gpuErrchk(cudaOccupancyMaxPotentialBlockSize(&evalKeys_bt.x, &evalKeys_bt.y, evalKeys_kdtree));
 				gpuErrchk(cudaOccupancyMaxPotentialBlockSize(&evalIndices_bt.x, &evalIndices_bt.y, evalIndices));
-				gpuErrchk(cudaOccupancyMaxPotentialBlockSize(&evalBox_bt.x, &evalBox_bt.y, evalBox));
-				gpuErrchk(cudaOccupancyMaxPotentialBlockSize(&evalKeysLeaves_bt.x, &evalKeysLeaves_bt.y, evalKeysLeaves_kdtree));
-				gpuErrchk(cudaOccupancyMaxPotentialBlockSize(&indexLeaves_bt.x, &indexLeaves_bt.y, indexLeaves));
+				gpuErrchk(cudaOccupancyMaxPotentialBlockSize(&evalBox_bt.x, &evalBox_bt.y, evalBox<false>));
 				gpuErrchk(cudaOccupancyMaxPotentialBlockSize(&multLeaves_bt.x, &multLeaves_bt.y, multLeaves));
 				gpuErrchk(cudaOccupancyMaxPotentialBlockSize(&centerLeaves_bt.x, &centerLeaves_bt.y, centerLeaves));
 				gpuErrchk(cudaOccupancyMaxPotentialBlockSize(&multipoleLeaves_bt.x, &multipoleLeaves_bt.y, fmm_multipoleLeaves3_kdtree));
@@ -1618,15 +1535,13 @@ void fmm_cart3_kdtree(VEC *p, VEC *a, int n, const SCAL* param)
 				gpuErrchk(cudaFree(d_p2p_list));
 				gpuErrchk(cudaFree(d_m2l_list));
 				gpuErrchk(cudaFree(d_stack));
-				gpuErrchk(cudaFree(d_offsets));
 			}
-			p2p_max = std::min(ntot*200, int(prop.totalGlobalMem/(4*sizeof(int2))));
-			m2l_max = std::min(ntot*200, int(prop.totalGlobalMem/(4*sizeof(int2))));
+			p2p_max = std::min(ntot*100, int(prop.totalGlobalMem/(4*sizeof(int2))));
+			m2l_max = std::min(ntot*100, int(prop.totalGlobalMem/(4*sizeof(int2))));
 			stack_max = std::max(ntot*10, 100000);
 			gpuErrchk(cudaMalloc((void**)&d_p2p_list, sizeof(int2)*p2p_max));
 			gpuErrchk(cudaMalloc((void**)&d_m2l_list, sizeof(int2)*m2l_max));
 			gpuErrchk(cudaMalloc((void**)&d_stack, sizeof(int2)*stack_max));
-			gpuErrchk(cudaMalloc((void**)&d_offsets, sizeof(int)*(kd_n(L)+1)));
 		}
 
 		gpuErrchk(cudaMemcpy(::d_fmm_order, &::fmm_order, sizeof(int), cudaMemcpyHostToDevice));
@@ -1667,19 +1582,16 @@ void fmm_cart3_kdtree(VEC *p, VEC *a, int n, const SCAL* param)
 
 	for (int l = 1; l <= L-1; ++l)
 	{
-		evalBox <<< std::min(evalBox_bt.x, (kd_n(l)-1)/evalBox_bt.y+1), evalBox_bt.y >>> (tree, p, n, l, d_offsets);
+		evalBox <<< std::min(evalBox_bt.x, (kd_n(l)-1)/evalBox_bt.y+1), evalBox_bt.y >>> (tree, p, n, l);
 		evalKeys_kdtree <<< std::min(evalKeys_bt.x, (n-1)/evalKeys_bt.y+1), evalKeys_bt.y >>> (d_keys, tree.splitdim + kd_beg(l), p, n, l);
 		evalIndices <<< std::min(evalIndices_bt.x, (n-1)/evalIndices_bt.y+1), evalIndices_bt.y >>> (d_ind, n);
 
-		sort_particle_gpu(p, d_tmp, n, d_keys, d_ind, d_tmp_stor, stor_bytes, d_unsort, d_offsets, kd_n(l), true);
+		sort_particle_gpu(p, d_tmp, n, d_keys, d_ind, d_tmp_stor, stor_bytes, d_unsort, tree.index + kd_beg(l), kd_n(l), true);
 	}
 
-	evalBox <<< std::min(evalBox_bt.x, (m-1)/evalBox_bt.y+1), evalBox_bt.y >>> (tree, p, n, L);
-	evalKeysLeaves_kdtree <<< std::min(evalKeysLeaves_bt.x, (m-1)/evalKeysLeaves_bt.y+1), evalKeysLeaves_bt.y >>> ((int*)d_keys, n, L);
+	evalBox<true> <<< std::min(evalBox_bt.x, (m-1)/evalBox_bt.y+1), evalBox_bt.y >>> (tree, p, n, L);
 
 	gpuErrchk(cudaMemset(tree.mpole, 0, ntot*(symmetricoffset3(order)+tracelessoffset3(order+1))*sizeof(SCAL)));
-
-	indexLeaves <<< std::min(indexLeaves_bt.x, (m-1)/indexLeaves_bt.y+1), indexLeaves_bt.y >>> (tree.index + beg, (int*)d_keys, m, n);
 
 	multLeaves <<< std::min(multLeaves_bt.x, (m-1)/multLeaves_bt.y+1), multLeaves_bt.y >>> (tree.mult + beg, tree.index + beg, m, n);
 
@@ -1704,7 +1616,7 @@ void fmm_cart3_kdtree(VEC *p, VEC *a, int n, const SCAL* param)
 		}
 	}
 
-	fmm_dualTraversal <<< (L >= 3) ? 18 : 7, 1024 >>>
+	fmm_dualTraversal<true> <<< (L >= 3) ? 18 : 7, 1024 >>>
 		(tree, d_p2p_list, d_m2l_list, d_stack, d_p2p_n, d_m2l_n, p2p_max, m2l_max, stack_max, radius, L);
 
 	gpuErrchk(cudaMemset(a, 0, n*sizeof(VEC)));
@@ -1904,14 +1816,11 @@ void fmm_cart3_kdtree_cpu(VEC *p, VEC *a, int n, const SCAL* param)
 		sort_particle_cpu(p, c_tmp, n, keys, ind, unsort);
 	}
 
-	evalBox_cpu(tree, p, n, L);
-	evalKeysLeaves_kdtree_cpu((int*)keys, n, L);
+	evalBox_cpu<true>(tree, p, n, L);
 
 	fmm_init3_kdtree_cpu(tree, L);
 
 	int beg = kd_beg(L), m = kd_n(L);
-
-	indexLeaves_cpu(tree.index + beg, (int*)keys, m, n);
 
 	multLeaves_cpu(tree.mult + beg, tree.index + beg, m, n);
 

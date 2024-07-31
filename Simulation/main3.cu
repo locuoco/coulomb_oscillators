@@ -41,6 +41,7 @@ compute-sanitizer --print-limit 1 nbco3 -test
 #include <limits>
 #include <random>
 #include <chrono>
+#include <vector>
 
 using namespace std::chrono;
 
@@ -271,10 +272,7 @@ int main(const int argc, const char** argv)
 							 "  -eps <v>          Smoothing factor. Must be greater than 0. Default is 1e-9.\n"
 							 "  -i <v>            A factor so that max FMM level is round(log(n*i/p^2)).\n"
 							 "                    Default is 10. Will be ignored if -accuracy is specified.\n"
-							 "  -ncoll            P2P pass will not be calculated, effectively ignoring\n"
-							 "                    collisional effects. Note however that the result will\n"
-							 "                    depend on the max FMM level, and the simulation may be\n"
-							 "                    highly unreliable at certain conditions. Will be ignored\n"
+							 "  -ncoll            P2P pass will not be calculated. Will be ignored\n"
 							 "                    if -accuracy is specified.\n"
 							 "  -accuracy <v>     Set minimum accuracy for the simulation. The program will\n"
 							 "                    search optimized parameters that satisfy this condition.\n"
@@ -284,13 +282,6 @@ int main(const int argc, const char** argv)
 							 "                    Implies -cpu.\n"
 							 "  -cacheline <n>    CPU cache line size in bytes. Defaut is 64. Will be ignored\n"
 							 "                    if -cpu is NOT specified.\n"
-							 "  -gpu <blocksize>  Specify the number of threads in a GPU block. It must be\n"
-							 "                    chosen from the list {1, 32, 64, 128, 256, 512, 1024} (1024\n"
-							 "                    threads is available for compute capability 2.0 and above).\n"
-							 "                    Default is 128. Will be ignored if -cpu is specified.\n"
-							 "  -gridsize <n>     Specify the maximum number of blocks in a GPU grid. Must be\n"
-							 "                    1 or greater. Default is 128. Will be ignored if -cpu is\n"
-							 "                    specified.\n"
 							 "  -test             Show relative errors and execution times of a single\n"
 							 "                    iteration instead of doing the simulation.\n"
 							 "  -x <vx> <vy> <vz> Set the std.dev. of positions. Will be ignored if [input]\n"
@@ -516,37 +507,6 @@ int main(const int argc, const char** argv)
 				}
 				++i;
 			}
-			else if (argv[i][1] == 'g' && argv[i][2] == 'p' && argv[i][3] == 'u' && argv[i][4] == '\0')
-			{
-				if (i+1 >= argc)
-				{
-					std::cerr << "Error: missing argument to '-gpu'\n";
-					return -1;
-				}
-				BLOCK_SIZE = atoi(argv[i+1]);
-				if (BLOCK_SIZE <= 0)
-				{
-					std::cerr << "Error: invalid argument to '-gpu': " << argv[i+1] << '\n';
-					return -1;
-				}
-				++i;
-			}
-			else if (argv[i][1] == 'g' && argv[i][2] == 'r' && argv[i][3] == 'i' && argv[i][4] == 'd' && argv[i][5] == 's'
-				  && argv[i][6] == 'i' && argv[i][7] == 'z' && argv[i][8] == 'e' && argv[i][9] == '\0')
-			{
-				if (i+1 >= argc)
-				{
-					std::cerr << "Error: missing argument to '-gridsize'\n";
-					return -1;
-				}
-				MAX_GRID_SIZE = atoi(argv[i+1]);
-				if (MAX_GRID_SIZE <= 0)
-				{
-					std::cerr << "Error: invalid argument to '-gridsize': " << argv[i+1] << '\n';
-					return -1;
-				}
-				++i;
-			}
 			else if (argv[i][1] == 't' && argv[i][2] == 'e' && argv[i][3] == 's' && argv[i][4] == 't' && argv[i][5] == '\0')
 				test = true;
 			else if (argv[i][1] == 'x' && argv[i][2] == 'i' && argv[i][3] == '\0')
@@ -741,11 +701,10 @@ int main(const int argc, const char** argv)
 
 	if (b_accuracy)
 	{
-		std::vector<SCAL> search_i = {1};
 		std::vector<int> search_p = {1, 2, 3, 4, 5, 6};
 		std::vector<SCAL> search_r = {1.11, 1.25, 1.43, 1.67, 2, 2.5, 3};
 
-		SCAL best_i, best_r, best_time = FLT_MAX, best_accuracy, curr_accuracy, curr_time;
+		SCAL best_r, best_time = FLT_MAX, best_accuracy, curr_accuracy, curr_time;
 		int best_p;
 
 		::coll = true;
@@ -753,32 +712,29 @@ int main(const int argc, const char** argv)
 		std::cout << "Parameter optimization in progress, please wait" << std::flush;
 
 		for (SCAL r : search_r)
-			for (SCAL i : search_i)
-				for (int p : search_p)
+			for (int p : search_p)
+			{
+				::tree_radius = r;
+				::fmm_order = p;
+
+				if (cpu)
+					curr_accuracy = test_accuracy_cpu(fmm_cart3_kdtree_cpu, direct3_cpu, buf, nBodies, par);
+				else
+					curr_accuracy = test_accuracy(fmm_cart3_kdtree, direct3, d_buf, nBodies, d_par);
+
+				if (curr_accuracy < accuracy)
 				{
-					::dens_inhom = i;
-					::tree_radius = r;
-					::fmm_order = p;
-
-					if (cpu)
-						curr_accuracy = test_accuracy_cpu(fmm_cart3_kdtree_cpu, direct3_cpu, buf, nBodies, par);
-					else
-						curr_accuracy = test_accuracy(fmm_cart3_kdtree, direct3, d_buf, nBodies, d_par);
-
-					if (curr_accuracy < accuracy)
+					curr_time = test_time(false);
+					if (curr_time < best_time)
 					{
-						curr_time = test_time(false);
-						if (curr_time < best_time)
-						{
-							best_i = i;
-							best_r = r;
-							best_p = p;
-							best_accuracy = curr_accuracy;
-							best_time = curr_time;
-						}
+						best_r = r;
+						best_p = p;
+						best_accuracy = curr_accuracy;
+						best_time = curr_time;
 					}
-					std::cout << '.' << std::flush;
 				}
+				std::cout << '.' << std::flush;
+			}
 		if (best_time == FLT_MAX)
 		{
 			std::cout << "\nOptimization failed!" << std::endl;
@@ -786,12 +742,10 @@ int main(const int argc, const char** argv)
 		}
 		else
 		{
-			::dens_inhom = best_i;
 			::tree_radius = best_r;
 			::fmm_order = best_p;
 			std::cout << "\nBest parameters: ";
-			std::cout << "i = " << best_i;
-			std::cout << ", r = " << best_r;
+			std::cout << "r = " << best_r;
 			std::cout << ", p = " << best_p;
 			std::cout << ", time = " << best_time;
 			std::cout << ", error = " << best_accuracy << std::endl;

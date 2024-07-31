@@ -26,30 +26,26 @@ inline __host__ __device__ VEC_T(SCAL, 2) kernel(VEC_T(SCAL, 2) a, VEC_T(SCAL, 2
 }
 inline __host__ __device__ VEC_T(SCAL, 3) kernel(VEC_T(SCAL, 3) a, VEC_T(SCAL, 3) d, SCAL invDist2)
 {
-	SCAL invDist = sqrt(invDist2);
-	SCAL invDist3 = invDist2 * invDist;
-	return fma(invDist3, d, a);
+	double invDist = sqrt(invDist2);
+	return fma(invDist2 * invDist, d, a);
 }
 inline __host__ __device__ VEC_T(SCAL, 4) kernel(VEC_T(SCAL, 4) a, VEC_T(SCAL, 4) d, SCAL invDist2)
 {
-	SCAL invDist4 = invDist2 * invDist2;
-	return fma(invDist4, d, a);
+	return fma(invDist2 * invDist2, d, a);
 }
 
 inline __host__ __device__ VEC_T(SCAL, 2) kernel(VEC_T(SCAL, 2) a, VEC_T(SCAL, 2) d, SCAL invDist2, SCAL c)
 {
-	return fma(invDist2*c, d, a);
+	return fma(c*invDist2, d, a);
 }
 inline __host__ __device__ VEC_T(SCAL, 3) kernel(VEC_T(SCAL, 3) a, VEC_T(SCAL, 3) d, SCAL invDist2, SCAL c)
 {
-	SCAL invDist = sqrt(invDist2);
-	SCAL invDist3 = invDist2 * invDist;
-	return fma(invDist3*c, d, a);
+	double invDist = sqrt(invDist2);
+	return fma(invDist2*invDist*c, d, a);
 }
 inline __host__ __device__ VEC_T(SCAL, 4) kernel(VEC_T(SCAL, 4) a, VEC_T(SCAL, 4) d, SCAL invDist2, SCAL c)
 {
-	SCAL invDist4 = invDist2 * invDist2;
-	return fma(invDist4*c, d, a);
+	return fma(invDist2*invDist2*c, d, a);
 }
 
 template<int BlockSize>
