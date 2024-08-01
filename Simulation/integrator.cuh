@@ -47,6 +47,24 @@ void symplectic_euler(void(*f)(VEC*, VEC*, int, const SCAL*), SCAL *d_buf, int n
 	f(d_p.pos, d_p.acc, n, param);
 }
 
+void pre_symplectic_euler(void(*f)(VEC*, VEC*, int, const SCAL*), SCAL *d_buf, int n,
+                          const SCAL* param, long double dt,
+                          void(*step_func)(VEC*, const VEC*, SCAL, int) = step,
+                          long double scale = 1)
+// 1st order
+{
+	ParticleSystem d_p = { (VEC*)d_buf, ((VEC*)d_buf) + n, ((VEC*)d_buf) + 2 * n };
+
+	// a = f(x)
+	f(d_p.pos, d_p.acc, n, param);
+
+	// v += a * dt
+	step_func(d_p.vel, d_p.acc, dt * scale, n);
+
+	// x += v * dt
+	step_func(d_p.pos, d_p.vel, dt, n);
+}
+
 void leapfrog(
 	void(*f)(VEC*, VEC*, int, const SCAL*),	// pointer to function for the evaulation of the field f(x)
 	SCAL *d_buf,                            // pointer to buffer containing x, v, a

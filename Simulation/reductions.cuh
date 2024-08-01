@@ -73,6 +73,7 @@ __global__ void minmaxReduce2Init_krnl(VEC *minmax)
 
 template <int blockSize>
 __global__ void minmaxReduce2_krnl(VEC *__restrict__ minmax_, const VEC *__restrict__ x, int n)
+// not working properly, this function needs a review
 {
 	using BlockReduceT = cub::BlockReduce<MinMaxVec, blockSize>;
 	__shared__ typename BlockReduceT::TempStorage temp_storage;

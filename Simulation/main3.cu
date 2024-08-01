@@ -790,10 +790,12 @@ int main(const int argc, const char** argv)
 
 	if (test)
 	{
+		::b_unsort = false;
 		std::cout << fmm_order << ": ";
 		std::cout << "Average time: "
 				  << test_time(true, 1)
 				  << " [s]" << std::endl;
+		::b_unsort = true;
 
 		for (fmm_order = 1; fmm_order <= 10; ++fmm_order)
 		{
@@ -811,18 +813,18 @@ int main(const int argc, const char** argv)
 	else if (test2)
 	{
 		::b_unsort = false;
-		for (int i = 0; i < 1; ++i)
+		for (int i = 0; i < ::tree_steps+1; ++i)
 		{
 			SCAL relerr;
 			if (cpu)
 			{
 				relerr = test_accuracy_cpu(fmm_cart3_kdtree_cpu, direct3_cpu, buf, nBodies, par);
-				symplectic_euler(coulombOscillatorFMMKD3_cpu, buf, nBodies, par, dt, step_cpu);
+				pre_symplectic_euler(add_elastic_cpu, buf, nBodies, par+3, dt, step_cpu);
 			}
 			else
 			{
 				relerr = test_accuracy(fmm_cart3_kdtree, direct3, d_buf, nBodies, d_par);
-				symplectic_euler(coulombOscillatorFMMKD3, d_buf, nBodies, d_par, dt);
+				pre_symplectic_euler(add_elastic, d_buf, nBodies, d_par+3, dt);
 			}
 
 			std::cout << "Relative error after " << i << " steps: " << relerr << std::endl;
@@ -830,6 +832,7 @@ int main(const int argc, const char** argv)
 	}
 	else
 	{
+		::b_unsort = false;
 		// precompute accelerations
 		if (cpu)
 			compute_force(coulombOscillatorFMMKD3_cpu, buf, nBodies, par);

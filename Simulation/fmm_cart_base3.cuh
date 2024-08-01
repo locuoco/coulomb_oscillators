@@ -967,6 +967,7 @@ inline __host__ __device__ void static_p2m_acc3(SCAL *M, int n, VEC d, SCAL q = 
 {
 	switch (n)
 	{
+#ifndef FAST_COMPILATION_
 		case 0:
 			static_p2m_acc3_<0>(M, d, q);
 			break;
@@ -985,6 +986,7 @@ inline __host__ __device__ void static_p2m_acc3(SCAL *M, int n, VEC d, SCAL q = 
 		case 5:
 			static_p2m_acc3_<5>(M, d, q);
 			break;
+#endif // FAST_COMPILATION_
 		default:
 			p2m_acc3(M, n, d, q);
 			break;
@@ -1421,6 +1423,7 @@ inline __host__ __device__ void static_l2l_acc3(SCAL *__restrict__ Ltupleo, SCAL
 {
 	switch (nL)
 	{
+#ifndef FAST_COMPILATION_
 		case 0:
 			static_l2l_acc_3<minn, 0, traceless>(Ltupleo, temp, Ltuplei, d, r);
 			break;
@@ -1439,6 +1442,7 @@ inline __host__ __device__ void static_l2l_acc3(SCAL *__restrict__ Ltupleo, SCAL
 		case 5:
 			static_l2l_acc_3<minn, 5, traceless>(Ltupleo, temp, Ltuplei, d, r);
 			break;
+#endif // FAST_COMPILATION_
 		default:
 			for (int q = minn; q <= nL; ++q)
 				if constexpr (traceless)
@@ -1584,6 +1588,7 @@ inline __host__ __device__ VEC static_l2p_field3(SCAL *__restrict__ temp, const 
 {
 	switch (nL)
 	{
+#ifndef FAST_COMPILATION_
 		case 0:
 			return static_l2p_field_3<0, traceless>(temp, Ltuple, d, r);
 		case 1:
@@ -1596,6 +1601,7 @@ inline __host__ __device__ VEC static_l2p_field3(SCAL *__restrict__ temp, const 
 			return static_l2p_field_3<4, traceless>(temp, Ltuple, d, r);
 		case 5:
 			return static_l2p_field_3<5, traceless>(temp, Ltuple, d, r);
+#endif // FAST_COMPILATION_
 		default:
 			if constexpr (traceless)
 				return l2p_traceless_field3(temp, Ltuple, nL, d, r);

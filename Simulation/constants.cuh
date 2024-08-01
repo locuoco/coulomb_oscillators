@@ -40,6 +40,7 @@ int CPU_THREADS = 8; // number of concurrent threads in CPU
 int fmm_order = 3; // fast multipole method order
 SCAL tree_radius = 1;
 int tree_L = 0;
+int tree_steps = 8;
 
 int h_mlt_max;
 __device__ int *d_fmm_order, *d_mlt_max;

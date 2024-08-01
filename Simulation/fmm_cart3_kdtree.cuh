@@ -1436,7 +1436,7 @@ void fmm_cart3_kdtree(VEC *p, VEC *a, int n, const SCAL* param)
 	static SCAL i_prev = 0;
 	static float *d_keys = nullptr;
 	static cudaDeviceProp prop;
-	static int order = -1, old_size = 0;
+	static int order = -1, old_size = 0, counter = 0;
 	static int n_prev = 0, n_max = 0, L = 0, ntot_max = 0;
 	static int *d_ind = nullptr, *d_unsort = nullptr;
 	static char *d_tbuf = nullptr;
@@ -1454,8 +1454,9 @@ void fmm_cart3_kdtree(VEC *p, VEC *a, int n, const SCAL* param)
 
 	assert(n > BLOCK_SIZE);
 
-	if (n != n_prev || ::fmm_order != order || ::dens_inhom != i_prev || clamp(::tree_L, 2, 30) != L)
+	if (n != n_prev || ::fmm_order != order || ::dens_inhom != i_prev || (::tree_L != 0 && clamp(::tree_L, 2, 30) != L))
 	{
+		counter = 0;
 		order = ::fmm_order;
 		i_prev = ::dens_inhom;
 		SCAL s = order*order;
@@ -1536,9 +1537,9 @@ void fmm_cart3_kdtree(VEC *p, VEC *a, int n, const SCAL* param)
 				gpuErrchk(cudaFree(d_m2l_list));
 				gpuErrchk(cudaFree(d_stack));
 			}
-			p2p_max = std::min(ntot*100, int(prop.totalGlobalMem/(4*sizeof(int2))));
-			m2l_max = std::min(ntot*100, int(prop.totalGlobalMem/(4*sizeof(int2))));
-			stack_max = std::max(ntot, 10000);
+			p2p_max = std::min(ntot*1000, int(prop.totalGlobalMem/(4*sizeof(int2))));
+			m2l_max = std::min(ntot*1000, int(prop.totalGlobalMem/(4*sizeof(int2))));
+			stack_max = std::max(ntot*10, 100000);
 			gpuErrchk(cudaMalloc((void**)&d_p2p_list, sizeof(int2)*p2p_max));
 			gpuErrchk(cudaMalloc((void**)&d_m2l_list, sizeof(int2)*m2l_max));
 			gpuErrchk(cudaMalloc((void**)&d_stack, sizeof(int2)*stack_max));
@@ -1568,36 +1569,39 @@ void fmm_cart3_kdtree(VEC *p, VEC *a, int n, const SCAL* param)
 	int smemSize = 49152;
 	SCAL radius = ::tree_radius;
 
-	minmaxReduce2(d_minmax, p, n);
-
-	static void *d_tmp_stor = nullptr;
-	static size_t stor_bytes = 0;
-
-	evalRootBox <<< 1, 1 >>> (tree, d_minmax);
-	evalKeys_kdtree <<< std::min(evalKeys_bt.x, (n-1)/evalKeys_bt.y+1), evalKeys_bt.y >>> (d_keys, tree.splitdim, p, n, 0);
-	evalIndices <<< std::min(evalIndices_bt.x, (n-1)/evalIndices_bt.y+1), evalIndices_bt.y >>> (d_ind, n);
-	evalIndices <<< std::min(evalIndices_bt.x, (n-1)/evalIndices_bt.y+1), evalIndices_bt.y >>> (d_unsort, n);
-
-	sort_particle_gpu(p, d_tmp, n, d_keys, d_ind, d_tmp_stor, stor_bytes, d_unsort, nullptr, 1, true);
-
-	for (int l = 1; l <= L-1; ++l)
+	if (::b_unsort || counter % ::tree_steps == 0)
 	{
-		evalBox <<< std::min(evalBox_bt.x, (kd_n(l)-1)/evalBox_bt.y+1), evalBox_bt.y >>> (tree, p, n, l);
-		evalKeys_kdtree <<< std::min(evalKeys_bt.x, (n-1)/evalKeys_bt.y+1), evalKeys_bt.y >>> (d_keys, tree.splitdim + kd_beg(l), p, n, l);
+		minmaxReduce(d_minmax, p, n);
+
+		static void *d_tmp_stor = nullptr;
+		static size_t stor_bytes = 0;
+
+		evalRootBox <<< 1, 1 >>> (tree, d_minmax);
+		evalKeys_kdtree <<< std::min(evalKeys_bt.x, (n-1)/evalKeys_bt.y+1), evalKeys_bt.y >>> (d_keys, tree.splitdim, p, n, 0);
 		evalIndices <<< std::min(evalIndices_bt.x, (n-1)/evalIndices_bt.y+1), evalIndices_bt.y >>> (d_ind, n);
+		evalIndices <<< std::min(evalIndices_bt.x, (n-1)/evalIndices_bt.y+1), evalIndices_bt.y >>> (d_unsort, n);
 
-		sort_particle_gpu(p, d_tmp, n, d_keys, d_ind, d_tmp_stor, stor_bytes, d_unsort, tree.index + kd_beg(l), kd_n(l), true);
+		sort_particle_gpu(p, d_tmp, n, d_keys, d_ind, d_tmp_stor, stor_bytes, d_unsort, nullptr, 1, true);
+
+		for (int l = 1; l <= L-1; ++l)
+		{
+			evalBox <<< std::min(evalBox_bt.x, (kd_n(l)-1)/evalBox_bt.y+1), evalBox_bt.y >>> (tree, p, n, l);
+			evalKeys_kdtree <<< std::min(evalKeys_bt.x, (n-1)/evalKeys_bt.y+1), evalKeys_bt.y >>> (d_keys, tree.splitdim + kd_beg(l), p, n, l);
+			evalIndices <<< std::min(evalIndices_bt.x, (n-1)/evalIndices_bt.y+1), evalIndices_bt.y >>> (d_ind, n);
+
+			sort_particle_gpu(p, d_tmp, n, d_keys, d_ind, d_tmp_stor, stor_bytes, d_unsort, tree.index + kd_beg(l), kd_n(l), true);
+		}
+
+		evalBox<true> <<< std::min(evalBox_bt.x, (m-1)/evalBox_bt.y+1), evalBox_bt.y >>> (tree, p, n, L);
+
+		multLeaves <<< std::min(multLeaves_bt.x, (m-1)/multLeaves_bt.y+1), multLeaves_bt.y >>> (tree.mult + beg, tree.index + beg, m, n);
 	}
-
-	evalBox<true> <<< std::min(evalBox_bt.x, (m-1)/evalBox_bt.y+1), evalBox_bt.y >>> (tree, p, n, L);
-
-	// zeroing multipole and local expansions
-	gpuErrchk(cudaMemset(tree.mpole, 0, ntot*(symmetricoffset3(order)+tracelessoffset3(order+1))*sizeof(SCAL)));
-
-	multLeaves <<< std::min(multLeaves_bt.x, (m-1)/multLeaves_bt.y+1), multLeaves_bt.y >>> (tree.mult + beg, tree.index + beg, m, n);
 
 	centerLeaves <<< std::min(centerLeaves_bt.x, (m-1)/centerLeaves_bt.y+1), centerLeaves_bt.y >>>
 		(tree.center + beg, tree.mult + beg, tree.index + beg, p, m);
+
+	// zeroing multipole and local expansions
+	gpuErrchk(cudaMemset(tree.mpole, 0, ntot*(symmetricoffset3(order)+tracelessoffset3(order+1))*sizeof(SCAL)));
 
 	fmm_multipoleLeaves3_kdtree <<< std::min(multipoleLeaves_bt.x, (ntot-1)/multipoleLeaves_bt.y+1), multipoleLeaves_bt.y >>> (tree, p, L);
 
@@ -1709,7 +1713,7 @@ void fmm_cart3_kdtree(VEC *p, VEC *a, int n, const SCAL* param)
 		gather_inverse_krnl <<< std::min(gather_bt.x, (n-1)/gather_bt.y+1), gather_bt.y >>> (d_tmp, a, d_unsort, n);
 		copy_krnl <<< std::min(copy_bt.x, (n-1)/copy_bt.y+1), copy_bt.y >>> (a, d_tmp, n);
 	}
-	else
+	else if (counter % ::tree_steps == 0)
 	{
 		// sort velocities in order to match positions and accelerations indices
 		gather_krnl <<< std::min(gather_bt.x, (n-1)/gather_bt.y+1), gather_bt.y >>> (d_tmp, p+n, d_unsort, n);
@@ -1724,6 +1728,7 @@ void fmm_cart3_kdtree(VEC *p, VEC *a, int n, const SCAL* param)
 	if (ntot > ntot_max)
 		ntot_max = ntot;
 	n_prev = n;
+	++counter;
 }
 
 void fmm_cart3_kdtree_cpu(VEC *p, VEC *a, int n, const SCAL* param)
