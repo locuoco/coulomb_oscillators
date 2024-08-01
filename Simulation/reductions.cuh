@@ -49,63 +49,34 @@ inline __device__ __host__ SCAL rel_diff2(VEC x, VEC ref)
 	return 2*sqrt(dist2/div2);
 }
 
-struct MinMaxVec
+struct VecMin
 {
-	SCAL xmin, ymin, zmin, xmax, ymax, zmax;
-};
-
-struct MinMax
-{
-	__host__ __device__ __forceinline__ MinMaxVec operator()(const MinMaxVec& a, const MinMaxVec& b) const
+	__device__ __host__ __forceinline__ VEC operator()(const VEC& a, const VEC& b) const
 	{
-		return MinMaxVec{
-			min(a.xmin, b.xmin), min(a.ymin, b.ymin), min(a.zmin, b.zmin),
-			max(a.xmax, b.xmax), max(a.ymax, b.ymax), max(a.zmax, b.zmax)
-		};
+		return fmin(a, b);
+	}
+};
+struct VecMax
+{
+	__device__ __host__ __forceinline__ VEC operator()(const VEC& a, const VEC& b) const
+	{
+		return fmax(a, b);
 	}
 };
 
-__global__ void minmaxReduce2Init_krnl(VEC *minmax)
+void minmaxReduce2(VEC *minmax, const VEC *src, unsigned int n, void *& d_tmp_stor, size_t& stor_bytes)
 {
-	minmax[0] = {FLT_MAX, FLT_MAX, FLT_MAX};
-	minmax[1] = {-FLT_MAX, -FLT_MAX, -FLT_MAX};
-}
-
-template <int blockSize>
-__global__ void minmaxReduce2_krnl(VEC *__restrict__ minmax_, const VEC *__restrict__ x, int n)
-// not working properly, this function needs a review
-{
-	using BlockReduceT = cub::BlockReduce<MinMaxVec, blockSize>;
-	__shared__ typename BlockReduceT::TempStorage temp_storage;
-
-	int tid = threadIdx.x;
-	int gid = gridDim.x * blockIdx.x + tid;
-
-	MinMaxVec result, data;
-	if (gid < n)
-		data = {x[gid].x, x[gid].y, x[gid].z, x[gid].x, x[gid].y, x[gid].z};
-	else
-		data = {FLT_MAX, FLT_MAX, FLT_MAX, -FLT_MAX, -FLT_MAX, -FLT_MAX};
-
-	result = BlockReduceT(temp_storage).Reduce(data, MinMax());
-
-	if (tid == 0)
+	size_t new_stor_bytes = 0;
+	gpuErrchk(cub::DeviceReduce::Reduce(nullptr, new_stor_bytes, src, minmax, n, VecMin(), ONES_VEC*FLT_MAX));
+	if (new_stor_bytes > stor_bytes)
 	{
-		myAtomicMin(&minmax_[0].x, result.xmin);
-		myAtomicMin(&minmax_[0].y, result.ymin);
-		myAtomicMin(&minmax_[0].z, result.zmin);
-
-		myAtomicMax(&minmax_[1].x, result.xmax);
-		myAtomicMax(&minmax_[1].y, result.ymax);
-		myAtomicMax(&minmax_[1].z, result.zmax);
+		if (stor_bytes > 0)
+			gpuErrchk(cudaFree(d_tmp_stor));
+		stor_bytes = new_stor_bytes;
+		gpuErrchk(cudaMalloc(&d_tmp_stor, stor_bytes));
 	}
-}
-
-void minmaxReduce2(VEC *minmax, const VEC *src, unsigned int n)
-{
-	int nBlocks = (n-1)/1024 + 1;
-	minmaxReduce2Init_krnl <<< 1, 1 >>> (minmax);
-	minmaxReduce2_krnl<1024> <<< nBlocks, 1024 >>> (minmax, src, n);
+	gpuErrchk(cub::DeviceReduce::Reduce(d_tmp_stor, stor_bytes, src, minmax, n, VecMin(), ONES_VEC*FLT_MAX));
+	gpuErrchk(cub::DeviceReduce::Reduce(d_tmp_stor, stor_bytes, src, minmax+1, n, VecMax(), -ONES_VEC*FLT_MAX));
 }
 
 template <int blockSize>

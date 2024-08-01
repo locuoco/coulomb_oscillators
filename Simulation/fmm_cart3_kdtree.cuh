@@ -1284,7 +1284,7 @@ void fmm_pushLeaves3_kdtree_cpu(VEC *a, const VEC *p, fmmTree_kd tree, int L)
 }
 
 template <typename T>
-void sort_particle_gpu(VEC *__restrict__ p, VEC *__restrict__ d_tmp, int n, T *__restrict__ d_keys, int *__restrict__ d_ind,
+void sort_particle_gpu(VEC *__restrict__ p, int n, T *__restrict__ d_keys, int *__restrict__ d_ind,
 	void *& d_tmp_stor, size_t& stor_bytes, int *__restrict__ d_unsort, int *__restrict__ d_offsets = nullptr, int n_segs = 1,
 	bool eval = true)
 {
@@ -1331,11 +1331,11 @@ void sort_particle_gpu(VEC *__restrict__ p, VEC *__restrict__ d_tmp, int n, T *_
 	else
 		vals = d_ind+n;
 
-	gather_krnl <<< std::min(gather_bt.x, (n-1)/gather_bt.y+1), gather_bt.y >>> (d_tmp, p, vals, n);
-	copy_krnl <<< std::min(copy_bt.x, (n-1)/copy_bt.y+1), copy_bt.y >>> (p, d_tmp, n);
+	gather_krnl <<< std::min(gather_bt.x, (n-1)/gather_bt.y+1), gather_bt.y >>> ((VEC*)d_tmp_stor, p, vals, n);
+	copy_krnl <<< std::min(copy_bt.x, (n-1)/copy_bt.y+1), copy_bt.y >>> (p, (VEC*)d_tmp_stor, n);
 
-	gather_krnl <<< std::min(gatherint_bt.x, (n-1)/gatherint_bt.y+1), gatherint_bt.y >>> ((int*)d_tmp, d_unsort, vals, n);
-	copy_krnl <<< std::min(copyint_bt.x, (n-1)/copyint_bt.y+1), copyint_bt.y >>> (d_unsort, (int*)d_tmp, n);
+	gather_krnl <<< std::min(gatherint_bt.x, (n-1)/gatherint_bt.y+1), gatherint_bt.y >>> ((int*)d_tmp_stor, d_unsort, vals, n);
+	copy_krnl <<< std::min(copyint_bt.x, (n-1)/copyint_bt.y+1), copyint_bt.y >>> (d_unsort, (int*)d_tmp_stor, n);
 }
 
 template <typename T>
@@ -1442,7 +1442,8 @@ void fmm_cart3_kdtree(VEC *p, VEC *a, int n, const SCAL* param)
 	static char *d_tbuf = nullptr;
 	static fmmTree_kd tree;
 	static VEC *d_minmax = nullptr;
-	static VEC *d_tmp = nullptr;
+	static void *d_tmp_stor = nullptr;
+	static size_t stor_bytes = 0;
 	static int2 *d_p2p_list = nullptr, *d_m2l_list = nullptr, *d_stack = nullptr;
 	static int *d_p2p_n = nullptr, *d_m2l_n = nullptr;
 	static int p2p_max = 0, m2l_max = 0, stack_max = 0, ntot = 0;
@@ -1522,12 +1523,13 @@ void fmm_cart3_kdtree(VEC *p, VEC *a, int n, const SCAL* param)
 				gpuErrchk(cudaFree(d_keys));
 				gpuErrchk(cudaFree(d_ind));
 				gpuErrchk(cudaFree(d_unsort));
-				gpuErrchk(cudaFree(d_tmp));
+				gpuErrchk(cudaFree(d_tmp_stor));
 			}
 			gpuErrchk(cudaMalloc((void**)&d_keys, sizeof(float)*n*2));
 			gpuErrchk(cudaMalloc((void**)&d_ind, sizeof(int)*n*2));
 			gpuErrchk(cudaMalloc((void**)&d_unsort, sizeof(int)*n));
-			gpuErrchk(cudaMalloc((void**)&d_tmp, sizeof(VEC)*n));
+			stor_bytes = sizeof(VEC)*n;
+			gpuErrchk(cudaMalloc(&d_tmp_stor, stor_bytes));
 		}
 		if (ntot > ntot_max)
 		{
@@ -1571,17 +1573,14 @@ void fmm_cart3_kdtree(VEC *p, VEC *a, int n, const SCAL* param)
 
 	if (::b_unsort || counter % ::tree_steps == 0)
 	{
-		minmaxReduce(d_minmax, p, n);
-
-		static void *d_tmp_stor = nullptr;
-		static size_t stor_bytes = 0;
+		minmaxReduce2(d_minmax, p, n, d_tmp_stor, stor_bytes);
 
 		evalRootBox <<< 1, 1 >>> (tree, d_minmax);
 		evalKeys_kdtree <<< std::min(evalKeys_bt.x, (n-1)/evalKeys_bt.y+1), evalKeys_bt.y >>> (d_keys, tree.splitdim, p, n, 0);
 		evalIndices <<< std::min(evalIndices_bt.x, (n-1)/evalIndices_bt.y+1), evalIndices_bt.y >>> (d_ind, n);
 		evalIndices <<< std::min(evalIndices_bt.x, (n-1)/evalIndices_bt.y+1), evalIndices_bt.y >>> (d_unsort, n);
 
-		sort_particle_gpu(p, d_tmp, n, d_keys, d_ind, d_tmp_stor, stor_bytes, d_unsort, nullptr, 1, true);
+		sort_particle_gpu(p, n, d_keys, d_ind, d_tmp_stor, stor_bytes, d_unsort, nullptr, 1, true);
 
 		for (int l = 1; l <= L-1; ++l)
 		{
@@ -1589,7 +1588,7 @@ void fmm_cart3_kdtree(VEC *p, VEC *a, int n, const SCAL* param)
 			evalKeys_kdtree <<< std::min(evalKeys_bt.x, (n-1)/evalKeys_bt.y+1), evalKeys_bt.y >>> (d_keys, tree.splitdim + kd_beg(l), p, n, l);
 			evalIndices <<< std::min(evalIndices_bt.x, (n-1)/evalIndices_bt.y+1), evalIndices_bt.y >>> (d_ind, n);
 
-			sort_particle_gpu(p, d_tmp, n, d_keys, d_ind, d_tmp_stor, stor_bytes, d_unsort, tree.index + kd_beg(l), kd_n(l), true);
+			sort_particle_gpu(p, n, d_keys, d_ind, d_tmp_stor, stor_bytes, d_unsort, tree.index + kd_beg(l), kd_n(l), true);
 		}
 
 		evalBox<true> <<< std::min(evalBox_bt.x, (m-1)/evalBox_bt.y+1), evalBox_bt.y >>> (tree, p, n, L);
@@ -1707,17 +1706,17 @@ void fmm_cart3_kdtree(VEC *p, VEC *a, int n, const SCAL* param)
 	if (::b_unsort)
 	{
 		// unsort particle positions and accelerations to their initial places
-		gather_inverse_krnl <<< std::min(gather_bt.x, (n-1)/gather_bt.y+1), gather_bt.y >>> (d_tmp, p, d_unsort, n);
-		copy_krnl <<< std::min(copy_bt.x, (n-1)/copy_bt.y+1), copy_bt.y >>> (p, d_tmp, n);
+		gather_inverse_krnl <<< std::min(gather_bt.x, (n-1)/gather_bt.y+1), gather_bt.y >>> ((VEC*)d_tmp_stor, p, d_unsort, n);
+		copy_krnl <<< std::min(copy_bt.x, (n-1)/copy_bt.y+1), copy_bt.y >>> (p, (VEC*)d_tmp_stor, n);
 
-		gather_inverse_krnl <<< std::min(gather_bt.x, (n-1)/gather_bt.y+1), gather_bt.y >>> (d_tmp, a, d_unsort, n);
-		copy_krnl <<< std::min(copy_bt.x, (n-1)/copy_bt.y+1), copy_bt.y >>> (a, d_tmp, n);
+		gather_inverse_krnl <<< std::min(gather_bt.x, (n-1)/gather_bt.y+1), gather_bt.y >>> ((VEC*)d_tmp_stor, a, d_unsort, n);
+		copy_krnl <<< std::min(copy_bt.x, (n-1)/copy_bt.y+1), copy_bt.y >>> (a, (VEC*)d_tmp_stor, n);
 	}
 	else if (counter % ::tree_steps == 0)
 	{
 		// sort velocities in order to match positions and accelerations indices
-		gather_krnl <<< std::min(gather_bt.x, (n-1)/gather_bt.y+1), gather_bt.y >>> (d_tmp, p+n, d_unsort, n);
-		copy_krnl <<< std::min(copy_bt.x, (n-1)/copy_bt.y+1), copy_bt.y >>> (p+n, d_tmp, n);
+		gather_krnl <<< std::min(gather_bt.x, (n-1)/gather_bt.y+1), gather_bt.y >>> ((VEC*)d_tmp_stor, p+n, d_unsort, n);
+		copy_krnl <<< std::min(copy_bt.x, (n-1)/copy_bt.y+1), copy_bt.y >>> (p+n, (VEC*)d_tmp_stor, n);
 	}
 
 	gpuErrchk(cudaPeekAtLastError());
