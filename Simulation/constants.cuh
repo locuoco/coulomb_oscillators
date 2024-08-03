@@ -16,6 +16,8 @@
 
 #ifndef CONSTANTS_CUDA_H
 
+#include <bit> // std::countl_zero, std::bit_ceil
+
 // Important defines
 #ifndef SCAL
 #define SCAL float // scalar 
@@ -105,46 +107,26 @@ inline __device__ double myAtomicMax(double* address, double val)
 		: __longlong_as_double(atomicMin((unsigned long long*)address, (unsigned long long)__double_as_longlong(val)));
 }
 
-#ifdef __GNUC__
-#define host_clz(x) __builtin_clz(x)
-#elif defined(_MSC_VER)
-#include <windows.h>
-#include <intrin.h>
-inline uint32_t host_clz(uint32_t val)
-{
-	DWORD leading_zero = 0;
-	if (_BitScanReverse(&leading_zero, val))
-		return 31 - leading_zero;
-	else
-		return 32;
-}
-#else
-inline uint32_t host_popcnt(uint32_t x)
-{
-	x -= (x >> 1) & 0x55555555;
-	x = ((x >> 2) & 0x33333333) + (x & 0x33333333);
-	x = ((x >> 4) + x) & 0x0f0f0f0f;
-	x += x >> 8;
-	x += x >> 16;
-	return x & 0x0000003f
-}
-inline uint32_t host_clz(uint32_t x)
-{
-	x |= x >> 1;
-	x |= x >> 2;
-	x |= x >> 4;
-	x |= x >> 8;
-	x |= x >> 16;
-	return 32 - host_popcnt(x);
-}
-#endif // __GNUC__
-
 inline __host__ __device__ uint32_t clz(uint32_t val)
+// count leading zeros
 {
 #ifdef __CUDA_ARCH__
 	return __clz(val);
 #else
-	return host_clz(val);
+	return std::countl_zero(val);
+#endif
+}
+
+inline __host__ __device__ uint32_t bitceil(uint32_t val)
+// find the smallest power of two that is equal to or greater than `val`
+// used in `fmm_p2p3_kdtree` and in `fmm_p2p3_kdtree_coalesced` inside `fmm_cart3_kdtree.cuh`
+{
+#ifdef __CUDA_ARCH__
+	if (val <= 1)
+		return 1;
+	return 1 << (32 - __clz(val-1));
+#else
+	return std::bit_ceil(val);
 #endif
 }
 

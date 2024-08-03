@@ -36,12 +36,11 @@ compute-sanitizer --print-limit 1 nbco3 -test
 #include "fmm_cart3_kdtree.cuh"
 #include "reductions.cuh"
 
-#include <fstream>
-#include <sstream>
-#include <limits>
-#include <random>
-#include <chrono>
-#include <vector>
+#include <fstream> // std::ifstream, std::ofstream
+#include <limits> // std::numeric_limits
+#include <random> // std::mt19937_64, std::uniform_real_distribution, std::normal_distribution
+#include <chrono> // std::chrono::steady_clock, std::chrono::duration_cast
+#include <vector> // std::vector
 
 using namespace std::chrono;
 
@@ -797,7 +796,7 @@ int main(const int argc, const char** argv)
 				  << " [s]" << std::endl;
 		::b_unsort = true;
 
-		for (fmm_order = 1; fmm_order <= 10; ++fmm_order)
+		for (::fmm_order = 1; ::fmm_order <= 10; ++::fmm_order)
 		{
 			SCAL relerr;
 			std::cout << fmm_order << ": ";
@@ -805,7 +804,7 @@ int main(const int argc, const char** argv)
 			if (cpu)
 				relerr = test_accuracy_cpu(fmm_cart3_kdtree_cpu, direct3_cpu, buf, nBodies, par);
 			else
-				relerr = test_accuracy(fmm_cart3_kdtree, direct3, d_buf, nBodies, d_par);
+				relerr = test_accuracy(fmm_cart3_kdtree, direct3, d_buf, nBodies, d_par, ::fmm_order == 1);
 
 			std::cout << "Relative error: " << relerr << std::endl;
 		}

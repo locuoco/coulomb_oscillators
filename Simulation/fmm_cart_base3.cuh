@@ -17,7 +17,7 @@
 #ifndef FMM_CART_BASE3_CUDA_H
 #define FMM_CART_BASE3_CUDA_H
 
-#include <atomic> // atomic_ref
+#include <atomic> // std::atomic_ref
 
 #include "fmm_cart_base.cuh"
 

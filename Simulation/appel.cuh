@@ -19,7 +19,7 @@
 
 #include "direct.cuh"
 #include "reductions.cuh"
-#include <cub/cub.cuh>
+#include <cub/cub.cuh> // cub::DoubleBuffer, cub::DeviceRadixSort::SortPairs
 
 struct Tree
 {

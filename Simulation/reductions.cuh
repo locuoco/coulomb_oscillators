@@ -19,7 +19,7 @@
 
 #include "kernel.cuh"
 
-#include <cub/cub.cuh>
+#include <cub/cub.cuh> // cub::DeviceReduce::Reduce
 
 #if DIM == 2
 #define ONES_VEC VEC{1,1}
