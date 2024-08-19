@@ -443,6 +443,12 @@ __constant__ constexpr SCAL d_contract_coeff[]{
 };
 
 __host__ __device__
+constexpr int greater_equal_odd(int n)
+{
+	return (n & 1) ? n : n+1;
+}
+
+__host__ __device__
 inline long long factorial(int n)
 {
 // factorial

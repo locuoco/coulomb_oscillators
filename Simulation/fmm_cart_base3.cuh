@@ -21,6 +21,8 @@
 
 #include "fmm_cart_base.cuh"
 
+#pragma warning (disable : 4068) // disable 'unrecognized pragma' warnings for MSVC compiler
+
 __host__ __device__
 inline SCAL coeff13(int n, int m)
 {
@@ -1285,9 +1287,6 @@ inline void static_p2m_acc3(SCAL *__restrict__ M, int n, VEC d, SCAL q = 1)
 		case 4:
 			static_p2m_acc3_<4>(M, d, q);
 			break;
-		case 5:
-			static_p2m_acc3_<5>(M, d, q);
-			break;
 		default:
 			p2m_acc3(M, n, d, q);
 			break;
@@ -1475,9 +1474,6 @@ inline void static_m2m_acc3(SCAL *__restrict__ Mout, const SCAL *__restrict__ Mt
 			break;
 		case 4:
 			static_m2m_acc3_<4>(Mout, Mtuple, d);
-			break;
-		case 5:
-			static_m2m_acc3_<5>(Mout, Mtuple, d);
 			break;
 		default:
 			m2m_acc3(Mout, Mtuple, n, d);
