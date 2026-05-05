@@ -17,11 +17,13 @@
 /*
 
 Compilation:
-nvcc main3.cu -o nbco3 -O3 -ftz=true -arch=sm_75 --expt-relaxed-constexpr <std=c++20>
-nvcc main3.cu -o nbco3 -O3 -use_fast_math -arch=sm_75 --expt-relaxed-constexpr <std=c++20>
--Xptxas=-v
+nvcc main3.cu -o nbco3 -O3 -ftz=true -arch=native --expt-relaxed-constexpr <std=c++20>
+nvcc main3.cu -o nbco3 -O3 -use_fast_math -arch=native --expt-relaxed-constexpr <std=c++20>
 
-Use `--std c++20` for Windows (Visual Studio 2022) or `-std=c++20` for Linux (GCC 10-12)
+Optional (shows extended info on compiled kernels): -Xptxas=-v
+
+Use `--std c++20` for Windows (Visual Studio 2022) or `-std=c++20` for Linux (GCC 10-12,
+`-std=c++2a` for GCC9 and earlier)
 `-ftz=true` (flushing to zero) will ignore denormal numbers and treat them as zero
 
 For profiling:
